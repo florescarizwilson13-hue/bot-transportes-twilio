@@ -11,7 +11,6 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const ADMIN_PHONE = process.env.ADMIN_PHONE || 'whatsapp:+56990507327';
 const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER;
-const QUICK_REPLY_CONTENT_SID = process.env.QUICK_REPLY_CONTENT_SID;
 
 const twilioClient = twilio(
   process.env.TWILIO_ACCOUNT_SID,
@@ -124,7 +123,7 @@ function buildEventMessage(event, playerRows, responseRows) {
       formatNumberedList(pending),
       '',
       divider,
-      'Usa los botones o responde: asisto / no asisto / estado',
+      'Responde: asisto / no asisto / estado',
     ].join('\n');
   }
 
@@ -155,7 +154,7 @@ function buildEventMessage(event, playerRows, responseRows) {
     formatNumberedList(pending),
     '',
     divider,
-    'Usa los botones o responde: asisto / no asisto / estado',
+    'Responde: asisto / no asisto / estado',
   ].join('\n');
 }
 
@@ -258,22 +257,17 @@ async function getResponsesByEvent(eventId) {
   return data || [];
 }
 
-async function sendQuickReplyButtons(to, bodyText) {
-  if (!QUICK_REPLY_CONTENT_SID) {
-    throw new Error('Falta QUICK_REPLY_CONTENT_SID en .env');
-  }
-
+async function sendSimpleMenu(to, summary) {
   if (!TWILIO_WHATSAPP_NUMBER) {
     throw new Error('Falta TWILIO_WHATSAPP_NUMBER en .env');
   }
 
+  const text = `${summary}\n\nResponde con una de estas opciones:\n• asisto\n• no asisto\n• estado`;
+
   await twilioClient.messages.create({
     from: TWILIO_WHATSAPP_NUMBER,
     to,
-    contentSid: QUICK_REPLY_CONTENT_SID,
-    contentVariables: JSON.stringify({
-      1: bodyText
-    }),
+    body: text,
   });
 }
 
@@ -400,7 +394,7 @@ app.post('/whatsapp', async (req, res) => {
       const responses = await getResponsesByEvent(currentEvent.id);
       const summary = buildEventMessage(currentEvent, activePlayers, responses);
 
-      await sendQuickReplyButtons(from, summary);
+      await sendSimpleMenu(from, summary);
 
       twiml.message('Respuesta registrada.');
       return res.type('text/xml').send(twiml.toString());
@@ -411,9 +405,9 @@ app.post('/whatsapp', async (req, res) => {
       const responses = await getResponsesByEvent(currentEvent.id);
       const summary = buildEventMessage(currentEvent, activePlayers, responses);
 
-      await sendQuickReplyButtons(from, summary);
+      await sendSimpleMenu(from, summary);
 
-      twiml.message('Te envié el estado con botones.');
+      twiml.message('Te envié el estado.');
       return res.type('text/xml').send(twiml.toString());
     }
 
@@ -422,12 +416,11 @@ app.post('/whatsapp', async (req, res) => {
       const responses = await getResponsesByEvent(currentEvent.id);
       const summary = buildEventMessage(currentEvent, activePlayers, responses);
 
-      await sendQuickReplyButtons(from, summary);
+      await sendSimpleMenu(from, summary);
 
       twiml.message('Te envié las opciones.');
       return res.type('text/xml').send(twiml.toString());
     }
-
   } catch (error) {
     console.error('ERROR WHATSAPP:', error);
     const twimlError = new twilio.twiml.MessagingResponse();
