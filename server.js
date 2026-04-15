@@ -30,6 +30,9 @@ const supabase = createClient(
 let adminSession = null;
 let currentEvent = null;
 
+// Guarda temporalmente a quién le estamos pidiendo motivo
+const pendingReason = {};
+
 function normalize(text) {
   return (text || '').trim();
 }
@@ -85,7 +88,7 @@ function formatNumberedList(names) {
 function buildEventMessage(event, playerRows, responseRows) {
   const responseMap = new Map();
   for (const r of responseRows) {
-    responseMap.set(r.player_id, r.response);
+    responseMap.set(r.player_id, r);
   }
 
   const attends = [];
@@ -93,10 +96,17 @@ function buildEventMessage(event, playerRows, responseRows) {
   const pending = [];
 
   for (const p of playerRows) {
-    const status = responseMap.get(p.id) || 'PENDIENTE';
-    if (status === 'ASISTE') attends.push(p.name);
-    else if (status === 'NO_ASISTE') noAttends.push(p.name);
-    else pending.push(p.name);
+    const responseRow = responseMap.get(p.id);
+    const status = responseRow?.response || 'PENDIENTE';
+
+    if (status === 'ASISTE') {
+      attends.push(p.name);
+    } else if (status === 'NO_ASISTE') {
+      const motivo = normalize(responseRow?.motivo);
+      noAttends.push(motivo ? `${p.name} (${motivo})` : p.name);
+    } else {
+      pending.push(p.name);
+    }
   }
 
   const divider = '────────────';
@@ -215,6 +225,7 @@ async function seedResponses(eventId) {
     event_id: eventId,
     player_id: player.id,
     response: 'PENDIENTE',
+    motivo: null,
   }));
 
   const { error } = await supabase
@@ -235,7 +246,7 @@ async function getPlayerByPhone(phone) {
   return data;
 }
 
-async function upsertResponse(eventId, playerId, response) {
+async function upsertResponse(eventId, playerId, response, motivo = null) {
   const { error } = await supabase
     .from('responses')
     .upsert(
@@ -243,6 +254,7 @@ async function upsertResponse(eventId, playerId, response) {
         event_id: eventId,
         player_id: playerId,
         response,
+        motivo,
         responded_at: new Date().toISOString(),
       },
       { onConflict: 'event_id,player_id' }
@@ -254,7 +266,7 @@ async function upsertResponse(eventId, playerId, response) {
 async function getResponsesByEvent(eventId) {
   const { data, error } = await supabase
     .from('responses')
-    .select('player_id, response')
+    .select('player_id, response, motivo')
     .eq('event_id', eventId)
     .order('player_id', { ascending: true });
 
@@ -314,6 +326,29 @@ app.post('/whatsapp', async (req, res) => {
     console.log('BUTTON_TEXT:', buttonText);
     console.log('BUTTON_PAYLOAD:', buttonPayload);
     console.log('COMMAND:', command);
+
+    // Si estamos esperando motivo por "No asisto"
+    if (pendingReason[from]) {
+      const pending = pendingReason[from];
+      delete pendingReason[from];
+
+      await upsertResponse(
+        pending.eventId,
+        pending.playerId,
+        'NO_ASISTE',
+        body
+      );
+
+      const activePlayers = await getActivePlayers();
+      const responses = await getResponsesByEvent(pending.eventId);
+      const summary = buildEventMessage(pending.event, activePlayers, responses);
+
+      await sendQuickReplyButtons(from, summary);
+      await notifyAdmins(`📢 ${pending.playerName} confirmó NO_ASISTE (${body})\n\n${summary}`);
+
+      twiml.message('Respuesta registrada.');
+      return res.type('text/xml').send(twiml.toString());
+    }
 
     if (commandLower === 'cancelar') {
       adminSession = null;
@@ -408,13 +443,12 @@ app.post('/whatsapp', async (req, res) => {
       return res.type('text/xml').send(twiml.toString());
     }
 
-    if (commandLower === 'asisto' || commandLower === 'no_asisto' || commandLower === 'no asisto') {
-      const responseValue = commandLower === 'asisto' ? 'ASISTE' : 'NO_ASISTE';
-
+    if (commandLower === 'asisto') {
       await upsertResponse(
         currentEvent.id,
         player.id,
-        responseValue
+        'ASISTE',
+        null
       );
 
       const activePlayers = await getActivePlayers();
@@ -422,9 +456,21 @@ app.post('/whatsapp', async (req, res) => {
       const summary = buildEventMessage(currentEvent, activePlayers, responses);
 
       await sendQuickReplyButtons(from, summary);
-      await notifyAdmins(`📢 ${player.name} confirmó ${responseValue}\n\n${summary}`);
+      await notifyAdmins(`📢 ${player.name} confirmó ASISTE\n\n${summary}`);
 
       twiml.message('Respuesta registrada.');
+      return res.type('text/xml').send(twiml.toString());
+    }
+
+    if (commandLower === 'no_asisto' || commandLower === 'no asisto') {
+      pendingReason[from] = {
+        eventId: currentEvent.id,
+        playerId: player.id,
+        playerName: player.name,
+        event: currentEvent,
+      };
+
+      twiml.message('¿Motivo?');
       return res.type('text/xml').send(twiml.toString());
     }
 
