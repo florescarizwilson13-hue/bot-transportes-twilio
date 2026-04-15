@@ -95,7 +95,7 @@ function buildEventMessage(event, playerRows, responseRows) {
     else pending.push(p.name);
   }
 
-  const divider = '━━━━━━━━━━━━━━━━━━━━';
+  const divider = '━━━━━━━━━━━━━━━━━';
 
   if (event.type === 'ENTRENAMIENTO') {
     const staffList = splitStaff(event.staff);
