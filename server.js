@@ -9,7 +9,11 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const ADMIN_PHONE = process.env.ADMIN_PHONE || 'whatsapp:+56990507327';
+const ADMIN_PHONES = (process.env.ADMIN_PHONES || '')
+  .split(',')
+  .map(p => p.trim())
+  .filter(Boolean);
+
 const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER;
 const QUICK_REPLY_CONTENT_SID = process.env.QUICK_REPLY_CONTENT_SID;
 
@@ -35,7 +39,7 @@ function lower(text) {
 }
 
 function isAdmin(phone) {
-  return normalize(phone) === normalize(ADMIN_PHONE);
+  return ADMIN_PHONES.includes(normalize(phone));
 }
 
 function getSteps(type) {
@@ -277,14 +281,16 @@ async function sendQuickReplyButtons(to, summary) {
   });
 }
 
-async function notifyAdmin(message) {
-  if (!TWILIO_WHATSAPP_NUMBER || !ADMIN_PHONE) return;
+async function notifyAdmins(message) {
+  if (!TWILIO_WHATSAPP_NUMBER || !ADMIN_PHONES.length) return;
 
-  await twilioClient.messages.create({
-    from: TWILIO_WHATSAPP_NUMBER,
-    to: ADMIN_PHONE,
-    body: message,
-  });
+  for (const phone of ADMIN_PHONES) {
+    await twilioClient.messages.create({
+      from: TWILIO_WHATSAPP_NUMBER,
+      to: phone,
+      body: message,
+    });
+  }
 }
 
 app.get('/', (req, res) => {
@@ -382,7 +388,7 @@ app.post('/whatsapp', async (req, res) => {
       const summary = buildEventMessage(event, activePlayers, responses);
 
       await sendQuickReplyButtons(from, summary);
-      await notifyAdmin(`📢 Partido creado correctamente\n\n${summary}`);
+      await notifyAdmins(`📢 Partido creado correctamente\n\n${summary}`);
 
       twiml.message('Partido creado y enviado con botones.');
       return res.type('text/xml').send(twiml.toString());
@@ -416,7 +422,7 @@ app.post('/whatsapp', async (req, res) => {
       const summary = buildEventMessage(currentEvent, activePlayers, responses);
 
       await sendQuickReplyButtons(from, summary);
-      await notifyAdmin(`📢 ${player.name} confirmó ${responseValue}\n\n${summary}`);
+      await notifyAdmins(`📢 ${player.name} confirmó ${responseValue}\n\n${summary}`);
 
       twiml.message('Respuesta registrada.');
       return res.type('text/xml').send(twiml.toString());
