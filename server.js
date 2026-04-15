@@ -95,8 +95,7 @@ function buildEventMessage(event, playerRows, responseRows) {
     else pending.push(p.name);
   }
 
-  const divider = '━━━━━━━━━━━━━━━━━';
-
+  const divider = '────────────';
 
   if (event.type === 'ENTRENAMIENTO') {
     const staffList = splitStaff(event.staff);
@@ -278,6 +277,16 @@ async function sendQuickReplyButtons(to, summary) {
   });
 }
 
+async function notifyAdmin(message) {
+  if (!TWILIO_WHATSAPP_NUMBER || !ADMIN_PHONE) return;
+
+  await twilioClient.messages.create({
+    from: TWILIO_WHATSAPP_NUMBER,
+    to: ADMIN_PHONE,
+    body: message,
+  });
+}
+
 app.get('/', (req, res) => {
   res.send('Servidor activo');
 });
@@ -373,6 +382,7 @@ app.post('/whatsapp', async (req, res) => {
       const summary = buildEventMessage(event, activePlayers, responses);
 
       await sendQuickReplyButtons(from, summary);
+      await notifyAdmin(`📢 Partido creado correctamente\n\n${summary}`);
 
       twiml.message('Partido creado y enviado con botones.');
       return res.type('text/xml').send(twiml.toString());
@@ -393,10 +403,12 @@ app.post('/whatsapp', async (req, res) => {
     }
 
     if (commandLower === 'asisto' || commandLower === 'no_asisto' || commandLower === 'no asisto') {
+      const responseValue = commandLower === 'asisto' ? 'ASISTE' : 'NO_ASISTE';
+
       await upsertResponse(
         currentEvent.id,
         player.id,
-        commandLower === 'asisto' ? 'ASISTE' : 'NO_ASISTE'
+        responseValue
       );
 
       const activePlayers = await getActivePlayers();
@@ -404,6 +416,7 @@ app.post('/whatsapp', async (req, res) => {
       const summary = buildEventMessage(currentEvent, activePlayers, responses);
 
       await sendQuickReplyButtons(from, summary);
+      await notifyAdmin(`📢 ${player.name} confirmó ${responseValue}\n\n${summary}`);
 
       twiml.message('Respuesta registrada.');
       return res.type('text/xml').send(twiml.toString());
