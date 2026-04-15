@@ -11,6 +11,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const ADMIN_PHONE = process.env.ADMIN_PHONE || 'whatsapp:+56990507327';
 const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER;
+const QUICK_REPLY_CONTENT_SID = process.env.QUICK_REPLY_CONTENT_SID;
 
 const twilioClient = twilio(
   process.env.TWILIO_ACCOUNT_SID,
@@ -123,7 +124,7 @@ function buildEventMessage(event, playerRows, responseRows) {
       formatNumberedList(pending),
       '',
       divider,
-      'Responde: asisto / no asisto / estado',
+      'Selecciona una opción:',
     ].join('\n');
   }
 
@@ -154,7 +155,7 @@ function buildEventMessage(event, playerRows, responseRows) {
     formatNumberedList(pending),
     '',
     divider,
-    'Responde: asisto / no asisto / estado',
+    'Selecciona una opción:',
   ].join('\n');
 }
 
@@ -257,17 +258,22 @@ async function getResponsesByEvent(eventId) {
   return data || [];
 }
 
-async function sendSimpleMenu(to, summary) {
+async function sendQuickReplyButtons(to, summary) {
   if (!TWILIO_WHATSAPP_NUMBER) {
-    throw new Error('Falta TWILIO_WHATSAPP_NUMBER en .env');
+    throw new Error('Falta TWILIO_WHATSAPP_NUMBER en variables');
   }
 
-  const text = `${summary}\n\nResponde con una de estas opciones:\n• asisto\n• no asisto\n• estado`;
+  if (!QUICK_REPLY_CONTENT_SID) {
+    throw new Error('Falta QUICK_REPLY_CONTENT_SID en variables');
+  }
 
   await twilioClient.messages.create({
     from: TWILIO_WHATSAPP_NUMBER,
     to,
-    body: text,
+    contentSid: QUICK_REPLY_CONTENT_SID,
+    contentVariables: JSON.stringify({
+      1: summary
+    }),
   });
 }
 
@@ -365,7 +371,9 @@ app.post('/whatsapp', async (req, res) => {
       const responses = await getResponsesByEvent(event.id);
       const summary = buildEventMessage(event, activePlayers, responses);
 
-      twiml.message(summary);
+      await sendQuickReplyButtons(from, summary);
+
+      twiml.message('Partido creado y enviado con botones.');
       return res.type('text/xml').send(twiml.toString());
     }
 
@@ -394,7 +402,7 @@ app.post('/whatsapp', async (req, res) => {
       const responses = await getResponsesByEvent(currentEvent.id);
       const summary = buildEventMessage(currentEvent, activePlayers, responses);
 
-      await sendSimpleMenu(from, summary);
+      await sendQuickReplyButtons(from, summary);
 
       twiml.message('Respuesta registrada.');
       return res.type('text/xml').send(twiml.toString());
@@ -405,7 +413,7 @@ app.post('/whatsapp', async (req, res) => {
       const responses = await getResponsesByEvent(currentEvent.id);
       const summary = buildEventMessage(currentEvent, activePlayers, responses);
 
-      await sendSimpleMenu(from, summary);
+      await sendQuickReplyButtons(from, summary);
 
       twiml.message('Te envié el estado.');
       return res.type('text/xml').send(twiml.toString());
@@ -416,7 +424,7 @@ app.post('/whatsapp', async (req, res) => {
       const responses = await getResponsesByEvent(currentEvent.id);
       const summary = buildEventMessage(currentEvent, activePlayers, responses);
 
-      await sendSimpleMenu(from, summary);
+      await sendQuickReplyButtons(from, summary);
 
       twiml.message('Te envié las opciones.');
       return res.type('text/xml').send(twiml.toString());
