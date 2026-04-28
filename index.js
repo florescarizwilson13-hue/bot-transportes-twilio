@@ -23,8 +23,8 @@ function escapeXml(valor) {
 function menu() {
   return `Bot Transporte activo
 
-1. Ver traslados (test)
-2. Ver usuarios (test)
+1. Ver traslados
+2. Ver usuarios
 3. Test conexión
 
 Escribe opción`;
@@ -37,7 +37,7 @@ async function procesarMensaje(mensaje) {
     return menu();
   }
 
-  // ================= TEST BASE =================
+  // ================= TEST =================
   if (texto === '3') {
     const { data, error } = await supabase
       .from('usuarios')
@@ -53,8 +53,8 @@ async function procesarMensaje(mensaje) {
   if (texto === '2') {
     const { data, error } = await supabase
       .from('usuarios')
-      .select('*')
-      .limit(5);
+      .select('usuario, correo, rol')
+      .limit(10);
 
     if (error) return 'Error usuarios: ' + error.message;
     if (!data || data.length === 0) return 'No hay usuarios';
@@ -62,7 +62,7 @@ async function procesarMensaje(mensaje) {
     let r = 'Usuarios:\n';
 
     data.forEach((u, i) => {
-      r += `${i + 1}. ${JSON.stringify(u)}\n`;
+      r += `${i + 1}. ${u.usuario} (${u.rol})\n`;
     });
 
     return r;
@@ -71,11 +71,13 @@ async function procesarMensaje(mensaje) {
   // ================= TRASLADOS =================
   if (texto === '1') {
     const { data, error } = await supabase
-      .from('servicios_consolidados')
+      .from('servicios_consolidados') // ← AJUSTAREMOS DESPUÉS
       .select('*')
-      .limit(3);
+      .limit(5);
 
-    if (error) return 'Error traslados: ' + error.message;
+    if (error) {
+      return 'Error traslados: ' + error.message;
+    }
 
     return `Traslados encontrados: ${data.length}`;
   }
