@@ -13,12 +13,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ================= FUNCIONES =================
-
-function normalizarTelefono(valor) {
-  return String(valor || '').replace(/\D/g, '').trim();
-}
-
 function escapeXml(valor) {
   return String(valor || '')
     .replace(/&/g, '&amp;')
@@ -28,17 +22,22 @@ function escapeXml(valor) {
     .replace(/'/g, '&apos;');
 }
 
-function esCoordinador(rol) {
-  return ['coordinador', 'admin', 'admin_general'].includes(String(rol || '').toLowerCase());
-}
+// ====================== WEBHOOK PRINCIPAL ======================
+app.post('/webhook', async (req, res) => {
+  try {
+    const { telefono, mensaje } = req.body;
 
-function esConductor(rol) {
-  return String(rol || '').toLowerCase() === 'conductor';
-}
+    if (!telefono || !mensaje) {
+      return res.json({ ok: false, respuesta: 'Faltan datos' });
+    }
 
-function menuCoordinador(nombre) {
-  return `Hola ${nombre}
+    const texto = mensaje.trim().toLowerCase();
 
+    // ===== MENU =====
+    if (texto === 'hola' || texto === 'menu') {
+      return res.json({
+        ok: true,
+        respuesta: `Hola Wilson
 Panel Coordinador
 
 1. Ver traslados del día
@@ -49,82 +48,95 @@ Panel Coordinador
 6. Reasignar pasajero
 7. Resumen por conductor
 
-Comandos:
-conductores
-comunas
-ver NOMBRE_COMUNA
-asignar TELEFONO COMUNA
-reasignar CODIGO TELEFONO
-resumen`;
-}
-
-function menuConductor(nombre) {
-  return `Hola ${nombre}
-
-Panel Conductor
-
-1. Ver mis comunas
-2. Ver pasajeros disponibles
-3. Ver mis pasajeros
-4. Tomar pasajero
-5. Traspasar pasajero
-6. Ver bloques
-7. Ver detalle bloque
-8. Iniciar bloque
-9. Terminar bloque
-
-Comandos:
-comunas
-mispasajeros
-mios
-tomar CODIGO
-traspasar CODIGO TELEFONO
-bloques`;
-}
-
-// ================= WEBHOOK PRINCIPAL =================
-
-app.post('/twilio/webhook', async (req, res) => {
-  try {
-    let telefono = req.body.From?.replace('whatsapp:', '');
-    let mensaje = req.body.Body;
-
-    telefono = normalizarTelefono(telefono);
-    mensaje = mensaje.toLowerCase().trim();
-
-    console.log('MENSAJE:', telefono, mensaje);
-
-    let respuesta = '';
-
-    // ===== HOLA =====
-    if (mensaje === 'hola') {
-      respuesta = `Bot Transportes activo
-
-Escribe:
-menu`;
+Escribe el número de opción`
+      });
     }
 
-    // ===== MENU =====
-    else if (mensaje === 'menu') {
-      const nombre = 'Wilson';
-      const rol = 'admin'; // luego lo sacamos de Supabase
+    // ===== OPCIONES =====
+    if (texto === '1') {
+      return res.json({
+        ok: true,
+        respuesta: 'Mostrando traslados del día...'
+      });
+    }
 
-      if (esCoordinador(rol)) {
-        respuesta = menuCoordinador(nombre);
-      } else if (esConductor(rol)) {
-        respuesta = menuConductor(nombre);
-      } else {
-        respuesta = 'No tienes rol asignado';
-      }
+    if (texto === '2') {
+      return res.json({
+        ok: true,
+        respuesta: 'Lista de conductores...'
+      });
+    }
+
+    if (texto === '3') {
+      return res.json({
+        ok: true,
+        respuesta: 'Comunas asignadas...'
+      });
+    }
+
+    if (texto === '4') {
+      return res.json({
+        ok: true,
+        respuesta: 'Pasajeros por comuna...'
+      });
+    }
+
+    if (texto === '5') {
+      return res.json({
+        ok: true,
+        respuesta: 'Asignar comuna a conductor...'
+      });
+    }
+
+    if (texto === '6') {
+      return res.json({
+        ok: true,
+        respuesta: 'Reasignar pasajero...'
+      });
+    }
+
+    if (texto === '7') {
+      return res.json({
+        ok: true,
+        respuesta: 'Resumen por conductor...'
+      });
     }
 
     // ===== DEFAULT =====
-    else {
-      respuesta = `No entiendo el comando
+    return res.json({
+      ok: true,
+      respuesta: 'No entiendo el comando. Escribe: menu'
+    });
 
-Escribe:
-menu`;
+  } catch (err) {
+    return res.json({ ok: false, respuesta: err.message });
+  }
+});
+
+// ====================== TWILIO ======================
+app.post('/twilio/webhook', async (req, res) => {
+  try {
+    const telefono = req.body.From?.replace('whatsapp:', '');
+    const mensaje = req.body.Body;
+
+    if (!telefono || !mensaje) {
+      res.type('text/xml');
+      return res.send(`
+<Response>
+  <Message>Error: mensaje inválido</Message>
+</Response>`);
     }
+
+    const puerto = process.env.PORT || 3000;
+
+    const response = await fetch(`http://127.0.0.1:${puerto}/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telefono, mensaje })
+    });
+
+    const data = await response.json();
+    const respuesta = data?.respuesta || 'Sin respuesta';
 
     res.type('text/xml');
     return res.send(`
@@ -143,8 +155,7 @@ menu`;
   }
 });
 
-// ================= START =================
-
+// ====================== START ======================
 app.listen(process.env.PORT || 3000, () => {
   console.log(`Servidor corriendo en puerto ${process.env.PORT || 3000}`);
 });
