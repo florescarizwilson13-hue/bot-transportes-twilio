@@ -48,28 +48,21 @@ async function procesarMensaje(mensaje) {
   }
 
   if (texto === '1') {
-    const { data, error } = await supabase
-      .from('servicios_consolidados')
-      .select('hora_reserva')
-      .eq('fecha_reserva', fechaHoy)
-      .order('hora_reserva');
+  const { data, error } = await supabase
+    .from('usuarios')
+    .select('nombre, rol')
+    .limit(5);
 
-    if (error) return 'Error viendo traslados: ' + error.message;
-    if (!data || data.length === 0) return 'No hay traslados para hoy';
+  if (error) return 'Error: ' + error.message;
+  if (!data || data.length === 0) return 'No hay datos en usuarios';
 
-    const conteo = {};
-    data.forEach(x => {
-      const h = x.hora_reserva || 'Sin hora';
-      conteo[h] = (conteo[h] || 0) + 1;
-    });
+  let respuesta = 'Prueba Supabase OK:\n';
+  data.forEach((x, i) => {
+    respuesta += `${i + 1}. ${x.nombre} - ${x.rol}\n`;
+  });
 
-    let respuesta = 'Traslados del día:\n';
-    Object.keys(conteo).sort().forEach((h, i) => {
-      respuesta += `${i + 1}. ${h} - ${conteo[h]} pasajeros\n`;
-    });
-
-    return respuesta;
-  }
+  return respuesta;
+}
 
   if (texto === '2') {
     const { data, error } = await supabase
