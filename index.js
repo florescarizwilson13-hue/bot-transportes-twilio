@@ -82,114 +82,54 @@ traspasar CODIGO TELEFONO
 bloques`;
 }
 
-// ================= LOGICA PRINCIPAL =================
+// ================= WEBHOOK PRINCIPAL =================
 
-app.post('/webhook', async (req, res) => {
+app.post('/twilio/webhook', async (req, res) => {
   try {
-    let { telefono, mensaje } = req.body;
-
-    if (!telefono || !mensaje) {
-      return res.json({
-        ok: false,
-        respuesta: 'Error: faltan datos'
-      });
-    }
+    let telefono = req.body.From?.replace('whatsapp:', '');
+    let mensaje = req.body.Body;
 
     telefono = normalizarTelefono(telefono);
     mensaje = mensaje.toLowerCase().trim();
 
     console.log('MENSAJE:', telefono, mensaje);
 
-    // ====== HOLA ======
+    let respuesta = '';
+
+    // ===== HOLA =====
     if (mensaje === 'hola') {
-      return res.json({
-        ok: true,
-        respuesta: `Bot Transportes activo
+      respuesta = `Bot Transportes activo
 
 Escribe:
-menu`
-      });
+menu`;
     }
 
-    // ====== MENU ======
-    if (mensaje === 'menu') {
-
-      // 🔥 TEMPORAL (luego lo conectamos a BD)
+    // ===== MENU =====
+    else if (mensaje === 'menu') {
       const nombre = 'Wilson';
-      const rol = 'admin';
+      const rol = 'admin'; // luego lo sacamos de Supabase
 
       if (esCoordinador(rol)) {
-        return res.json({
-          ok: true,
-          respuesta: menuCoordinador(nombre)
-        });
+        respuesta = menuCoordinador(nombre);
+      } else if (esConductor(rol)) {
+        respuesta = menuConductor(nombre);
+      } else {
+        respuesta = 'No tienes rol asignado';
       }
-
-      if (esConductor(rol)) {
-        return res.json({
-          ok: true,
-          respuesta: menuConductor(nombre)
-        });
-      }
-
-      return res.json({
-        ok: true,
-        respuesta: 'No tienes rol asignado'
-      });
     }
 
-    // ====== DEFAULT ======
-    return res.json({
-      ok: true,
-      respuesta: `No entiendo el comando
+    // ===== DEFAULT =====
+    else {
+      respuesta = `No entiendo el comando
 
 Escribe:
-menu`
-    });
-
-  } catch (err) {
-    console.error(err);
-    return res.json({
-      ok: false,
-      respuesta: 'Error interno'
-    });
-  }
-});
-
-// ================= TWILIO =================
-
-app.post('/twilio/webhook', async (req, res) => {
-  try {
-    const telefono = req.body.From?.replace('whatsapp:', '');
-    const mensaje = req.body.Body;
-
-    console.log('TWILIO:', telefono, mensaje);
-
-    if (!telefono || !mensaje) {
-      res.type('text/xml');
-      return res.send(`
-<Response>
-  <Message>Error mensaje inválido</Message>
-</Response>`);
+menu`;
     }
-
-    const puerto = process.env.PORT || 3000;
-
-    const response = await fetch(`http://127.0.0.1:${puerto}/webhook`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        telefono,
-        mensaje
-      })
-    });
-
-    const data = await response.json();
 
     res.type('text/xml');
     return res.send(`
 <Response>
-  <Message>${escapeXml(data.respuesta)}</Message>
+  <Message>${escapeXml(respuesta)}</Message>
 </Response>`);
 
   } catch (error) {
