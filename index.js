@@ -19,11 +19,10 @@ function normalizarTelefono(valor) {
   return String(valor || '').replace(/\D/g, '').trim();
 }
 
-// 🔥 NORMALIZADOR DE TEXTO (CLAVE PARA COMUNAS)
 function normalizarTexto(texto) {
   return String(texto || '')
-    .normalize("NFD")                 // separa acentos
-    .replace(/[\u0300-\u036f]/g, "") // elimina acentos
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
 }
@@ -50,8 +49,6 @@ function campo(obj, nombres) {
   return '';
 }
 
-// ================= ROLES =================
-
 function esCoordinador(rol) {
   return ['coordinador', 'admin', 'admin_general'].includes((rol || '').toLowerCase());
 }
@@ -59,8 +56,6 @@ function esCoordinador(rol) {
 function esConductor(rol) {
   return (rol || '').toLowerCase() === 'conductor';
 }
-
-// ================= MENUS =================
 
 function menuCoordinador(nombre) {
   return `Hola ${nombre}
@@ -85,8 +80,6 @@ Panel Conductor
 4. Traspasar pasajero`;
 }
 
-// ================= USUARIO =================
-
 async function buscarUsuario(telefono) {
   const tel = normalizarTelefono(telefono);
 
@@ -100,15 +93,10 @@ async function buscarUsuario(telefono) {
   return data;
 }
 
-// ================= COORDINADOR =================
-
 async function procesarCoordinador(usuario, texto) {
-
   const textoLower = texto.toLowerCase();
 
-  // 1. TRASLADOS
   if (textoLower === '1') {
-
     const { data } = await supabase
       .from('vista_consolidacion_final_operativa')
       .select('*')
@@ -131,9 +119,7 @@ async function procesarCoordinador(usuario, texto) {
     return r;
   }
 
-  // 2. CONDUCTORES
   if (textoLower === '2') {
-
     const { data } = await supabase
       .from('usuarios')
       .select('nombre, telefono_whatsapp')
@@ -148,9 +134,7 @@ async function procesarCoordinador(usuario, texto) {
     return r;
   }
 
-  // 3. COMUNAS
   if (textoLower === '3') {
-
     const { data } = await supabase
       .from('asignaciones_coordinador')
       .select('*')
@@ -165,25 +149,21 @@ async function procesarCoordinador(usuario, texto) {
     return r;
   }
 
-  // 4. PASAJEROS POR COMUNA
   if (textoLower === '4') {
     return 'Escribe:\nver Quilpué';
   }
 
-  // 🔥 AQUI ESTABA EL ERROR → YA ARREGLADO + NORMALIZADO
   if (textoLower.startsWith('ver ')) {
-
     const comunaInput = texto.substring(4).trim();
     const comunaNormalizada = normalizarTexto(comunaInput);
 
     const { data } = await supabase
       .from('vista_consolidacion_final_operativa')
       .select('*')
-      .limit(500);
+      .limit(1000);
 
     if (!data || data.length === 0) return 'No hay datos';
 
-    // 🔥 FILTRO INTELIGENTE
     const filtrados = data.filter(p => {
       const comunaDB = normalizarTexto(campo(p, ['Comuna']));
       return comunaDB.includes(comunaNormalizada);
@@ -193,15 +173,34 @@ async function procesarCoordinador(usuario, texto) {
       return `No hay pasajeros en ${comunaInput}`;
     }
 
+    filtrados.sort((a, b) => {
+      const ha = campo(a, ['Hora de reserva']) || '';
+      const hb = campo(b, ['Hora de reserva']) || '';
+      const na = campo(a, ['Nombre']) || '';
+      const nb = campo(b, ['Nombre']) || '';
+
+      if (ha !== hb) return ha.localeCompare(hb);
+      return na.localeCompare(nb);
+    });
+
+    const grupos = {};
+
+    filtrados.forEach(p => {
+      const hora = campo(p, ['Hora de reserva']) || 'Sin hora';
+      const nombre = campo(p, ['Nombre']) || 'Sin nombre';
+
+      if (!grupos[hora]) grupos[hora] = [];
+      grupos[hora].push(nombre);
+    });
+
     let r = `Pasajeros en ${comunaInput}:\n`;
 
-    filtrados.slice(0, 30).forEach((p, i) => {
-      const codigo = campo(p, ['Código']);
-      const nombre = campo(p, ['Nombre']);
-      const comuna = campo(p, ['Comuna']);
-      const hora = campo(p, ['Hora de reserva']);
+    Object.keys(grupos).sort().forEach(hora => {
+      r += `\n${hora}\n`;
 
-      r += `${i + 1}. ${codigo} - ${nombre} - ${hora}\n`;
+      grupos[hora].forEach((nombre, i) => {
+        r += `${i + 1}. ${nombre}\n`;
+      });
     });
 
     return r;
@@ -210,15 +209,10 @@ async function procesarCoordinador(usuario, texto) {
   return 'Opción no válida';
 }
 
-// ================= CONDUCTOR =================
-
 async function procesarConductor(usuario, texto) {
-
   const textoLower = texto.toLowerCase();
 
-  // 1. MIS PASAJEROS
   if (textoLower === '1') {
-
     const { data } = await supabase
       .from('reparto_pasajeros')
       .select(`
@@ -243,9 +237,7 @@ async function procesarConductor(usuario, texto) {
     return r;
   }
 
-  // 2. PASAJEROS DISPONIBLES
   if (textoLower === '2') {
-
     if (!usuario.comuna_asignada) {
       return 'No tienes comuna asignada';
     }
@@ -276,10 +268,7 @@ async function procesarConductor(usuario, texto) {
   return 'Opción no válida';
 }
 
-// ================= MAIN =================
-
 async function procesarMensaje(telefono, mensaje) {
-
   const usuario = await buscarUsuario(telefono);
   if (!usuario) return 'Número no autorizado';
 
@@ -300,8 +289,6 @@ async function procesarMensaje(telefono, mensaje) {
 
   return 'Rol no válido';
 }
-
-// ================= WEBHOOK =================
 
 app.post('/twilio/webhook', async (req, res) => {
   const telefono = req.body.From?.replace('whatsapp:', '');
