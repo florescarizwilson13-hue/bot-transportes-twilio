@@ -11,7 +11,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-app.post('/webhook', async (req, res) => {
+app.post('/twilio/webhook', async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
 
   let mensaje = (req.body.Body || '').trim();
