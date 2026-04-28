@@ -17,27 +17,15 @@ function escapeXml(valor) {
   return String(valor || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+    .replace(/>/g, '&gt;');
 }
 
-// ====================== WEBHOOK PRINCIPAL ======================
-app.post('/webhook', async (req, res) => {
-  try {
-    const { telefono, mensaje } = req.body;
+function fechaOperacion() {
+  return '2026-04-14';
+}
 
-    if (!telefono || !mensaje) {
-      return res.json({ ok: false, respuesta: 'Faltan datos' });
-    }
-
-    const texto = mensaje.trim().toLowerCase();
-
-    // ===== MENU =====
-    if (texto === 'hola' || texto === 'menu') {
-      return res.json({
-        ok: true,
-        respuesta: `Hola Wilson
+function menuCoordinador() {
+  return `Hola Wilson
 Panel Coordinador
 
 1. Ver traslados del día
@@ -48,95 +36,110 @@ Panel Coordinador
 6. Reasignar pasajero
 7. Resumen por conductor
 
-Escribe el número de opción`
-      });
-    }
+Escribe el número de opción`;
+}
 
-    // ===== OPCIONES =====
-    if (texto === '1') {
-      return res.json({
-        ok: true,
-        respuesta: 'Mostrando traslados del día...'
-      });
-    }
+async function procesarMensaje(mensaje) {
+  const texto = String(mensaje || '').trim().toLowerCase();
+  const fechaHoy = fechaOperacion();
 
-    if (texto === '2') {
-      return res.json({
-        ok: true,
-        respuesta: 'Lista de conductores...'
-      });
-    }
+  if (texto === 'hola' || texto === 'menu') {
+    return menuCoordinador();
+  }
 
-    if (texto === '3') {
-      return res.json({
-        ok: true,
-        respuesta: 'Comunas asignadas...'
-      });
-    }
+  if (texto === '1') {
+    const { data, error } = await supabase
+      .from('servicios_consolidados')
+      .select('hora_reserva')
+      .eq('fecha_reserva', fechaHoy)
+      .order('hora_reserva');
 
-    if (texto === '4') {
-      return res.json({
-        ok: true,
-        respuesta: 'Pasajeros por comuna...'
-      });
-    }
+    if (error) return 'Error viendo traslados: ' + error.message;
+    if (!data || data.length === 0) return 'No hay traslados para hoy';
 
-    if (texto === '5') {
-      return res.json({
-        ok: true,
-        respuesta: 'Asignar comuna a conductor...'
-      });
-    }
-
-    if (texto === '6') {
-      return res.json({
-        ok: true,
-        respuesta: 'Reasignar pasajero...'
-      });
-    }
-
-    if (texto === '7') {
-      return res.json({
-        ok: true,
-        respuesta: 'Resumen por conductor...'
-      });
-    }
-
-    // ===== DEFAULT =====
-    return res.json({
-      ok: true,
-      respuesta: 'No entiendo el comando. Escribe: menu'
+    const conteo = {};
+    data.forEach(x => {
+      const h = x.hora_reserva || 'Sin hora';
+      conteo[h] = (conteo[h] || 0) + 1;
     });
 
-  } catch (err) {
-    return res.json({ ok: false, respuesta: err.message });
-  }
-});
+    let respuesta = 'Traslados del día:\n';
+    Object.keys(conteo).sort().forEach((h, i) => {
+      respuesta += `${i + 1}. ${h} - ${conteo[h]} pasajeros\n`;
+    });
 
-// ====================== TWILIO ======================
+    return respuesta;
+  }
+
+  if (texto === '2') {
+    const { data, error } = await supabase
+      .from('usuarios')
+      .select('nombre, telefono_whatsapp, rol')
+      .eq('activo', true)
+      .eq('rol', 'conductor')
+      .order('nombre');
+
+    if (error) return 'Error listando conductores: ' + error.message;
+    if (!data || data.length === 0) return 'No hay conductores activos';
+
+    let respuesta = 'Conductores:\n';
+    data.forEach((c, i) => {
+      respuesta += `${i + 1}. ${c.nombre} - ${c.telefono_whatsapp || 'sin teléfono'}\n`;
+    });
+
+    return respuesta;
+  }
+
+  if (texto === '3') {
+    const { data, error } = await supabase
+      .from('asignaciones_coordinador')
+      .select('conductor_nombre, comuna')
+      .eq('fecha_operacion', fechaHoy)
+      .eq('activo', true)
+      .order('conductor_nombre')
+      .order('comuna');
+
+    if (error) return 'Error listando comunas: ' + error.message;
+    if (!data || data.length === 0) return 'No hay asignaciones para hoy';
+
+    let respuesta = 'Asignaciones del día:\n';
+    data.forEach((x, i) => {
+      respuesta += `${i + 1}. ${x.conductor_nombre} - ${x.comuna}\n`;
+    });
+
+    return respuesta;
+  }
+
+  if (texto === '7') {
+    const { data, error } = await supabase
+      .from('reparto_pasajeros')
+      .select('conductor_id_actual');
+
+    if (error) return 'Error generando resumen: ' + error.message;
+    if (!data || data.length === 0) return 'No hay pasajeros repartidos';
+
+    const conteo = {};
+    data.forEach(x => {
+      const id = x.conductor_id_actual || 'Sin conductor';
+      conteo[id] = (conteo[id] || 0) + 1;
+    });
+
+    let respuesta = 'Resumen por conductor:\n';
+    Object.keys(conteo).forEach((k, i) => {
+      respuesta += `${i + 1}. ${k} - ${conteo[k]} pasajeros\n`;
+    });
+
+    return respuesta;
+  }
+
+  return 'No entiendo el comando. Escribe: menu';
+}
+
 app.post('/twilio/webhook', async (req, res) => {
   try {
-    const telefono = req.body.From?.replace('whatsapp:', '');
     const mensaje = req.body.Body;
 
-    if (!telefono || !mensaje) {
-      res.type('text/xml');
-      return res.send(`
-<Response>
-  <Message>Error: mensaje inválido</Message>
-</Response>`);
-    }
-
-    const puerto = process.env.PORT || 3000;
-
-    const response = await fetch(`http://127.0.0.1:${puerto}/webhook`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ telefono, mensaje })
-    });
-
-    const data = await response.json();
-    const respuesta = data?.respuesta || 'Sin respuesta';
+    const respuesta = await procesarMensaje(mensaje);
 
     res.type('text/xml');
     return res.send(`
@@ -146,7 +149,6 @@ app.post('/twilio/webhook', async (req, res) => {
 
   } catch (error) {
     console.error(error);
-
     res.type('text/xml');
     return res.send(`
 <Response>
@@ -155,7 +157,6 @@ app.post('/twilio/webhook', async (req, res) => {
   }
 });
 
-// ====================== START ======================
 app.listen(process.env.PORT || 3000, () => {
   console.log(`Servidor corriendo en puerto ${process.env.PORT || 3000}`);
 });
