@@ -50,11 +50,11 @@ function campo(obj, nombres) {
 }
 
 function esCoordinador(rol) {
-  return ['coordinador', 'admin', 'admin_general'].includes((rol || '').toLowerCase());
+  return ['coordinador', 'admin', 'admin_general'].includes(String(rol || '').toLowerCase());
 }
 
 function esConductor(rol) {
-  return (rol || '').toLowerCase() === 'conductor';
+  return String(rol || '').toLowerCase() === 'conductor';
 }
 
 function menuCoordinador(nombre) {
@@ -67,7 +67,15 @@ Panel Coordinador
 4. Ver pasajeros por comuna
 5. Asignar comuna a conductor
 6. Reasignar pasajero
-7. Resumen por conductor`;
+7. Resumen por conductor
+
+Comandos:
+conductores
+comunas
+ver NOMBRE_COMUNA
+asignar TELEFONO COMUNA
+reasignar CODIGO TELEFONO
+resumen`;
 }
 
 function menuConductor(nombre) {
@@ -100,14 +108,14 @@ async function procesarCoordinador(usuario, texto) {
     const { data } = await supabase
       .from('vista_consolidacion_final_operativa')
       .select('*')
-      .limit(200);
+      .limit(1000);
 
     if (!data || data.length === 0) return 'No hay traslados';
 
     const conteo = {};
 
     data.forEach(x => {
-      const hora = campo(x, ['Hora de reserva']);
+      const hora = campo(x, ['Hora de reserva']) || 'Sin hora';
       conteo[hora] = (conteo[hora] || 0) + 1;
     });
 
@@ -119,12 +127,15 @@ async function procesarCoordinador(usuario, texto) {
     return r;
   }
 
-  if (textoLower === '2') {
+  if (textoLower === '2' || textoLower === 'conductores') {
     const { data } = await supabase
       .from('usuarios')
       .select('nombre, telefono_whatsapp')
       .eq('rol', 'conductor')
-      .eq('activo', true);
+      .eq('activo', true)
+      .order('nombre');
+
+    if (!data || data.length === 0) return 'No hay conductores';
 
     let r = 'Conductores:\n';
     data.forEach((c, i) => {
@@ -134,12 +145,15 @@ async function procesarCoordinador(usuario, texto) {
     return r;
   }
 
-  if (textoLower === '3') {
+  if (textoLower === '3' || textoLower === 'comunas') {
     const { data } = await supabase
       .from('asignaciones_coordinador')
       .select('*')
       .eq('fecha_operacion', FECHA_OPERACION)
-      .eq('activo', true);
+      .eq('activo', true)
+      .order('conductor_nombre');
+
+    if (!data || data.length === 0) return 'No hay comunas asignadas';
 
     let r = 'Asignaciones del día:\n';
     data.forEach((x, i) => {
@@ -150,7 +164,7 @@ async function procesarCoordinador(usuario, texto) {
   }
 
   if (textoLower === '4') {
-    return 'Escribe:\nver Quilpué';
+    return 'Para ver pasajeros por comuna escribe:\nver Quilpué';
   }
 
   if (textoLower.startsWith('ver ')) {
@@ -206,6 +220,79 @@ async function procesarCoordinador(usuario, texto) {
     return r;
   }
 
+  if (textoLower === '5') {
+    return 'Para asignar comuna escribe:\nasignar 56939414443 Quilpué';
+  }
+
+  if (textoLower.startsWith('asignar ')) {
+    const partes = texto.split(' ');
+
+    if (partes.length < 3) {
+      return 'Usa:\nasignar TELEFONO COMUNA';
+    }
+
+    const telefonoDestino = normalizarTelefono(partes[1]);
+    const comuna = partes.slice(2).join(' ').trim();
+
+    const destino = await buscarUsuario(telefonoDestino);
+
+    if (!destino) {
+      return 'No encontré conductor con ese teléfono';
+    }
+
+    await supabase
+      .from('usuarios')
+      .update({ comuna_asignada: comuna })
+      .eq('id', destino.id);
+
+    const { error } = await supabase
+      .from('asignaciones_coordinador')
+      .insert([{
+        fecha_operacion: FECHA_OPERACION,
+        conductor_id: destino.id,
+        conductor_nombre: destino.nombre,
+        comuna,
+        activo: true
+      }]);
+
+    if (error && !String(error.message || '').toLowerCase().includes('duplicate')) {
+      return 'Error asignando comuna: ' + error.message;
+    }
+
+    return `Asignación creada: ${destino.nombre} → ${comuna}`;
+  }
+
+  if (textoLower === '6') {
+    return 'Para reasignar pasajero escribe:\nreasignar CODIGO TELEFONO';
+  }
+
+  if (textoLower === '7' || textoLower === 'resumen') {
+    const { data } = await supabase
+      .from('reparto_pasajeros')
+      .select(`
+        conductor_id_actual,
+        usuarios:conductor_id_actual (
+          nombre
+        )
+      `);
+
+    if (!data || data.length === 0) return 'No hay pasajeros repartidos';
+
+    const conteo = {};
+
+    data.forEach(x => {
+      const nombre = x.usuarios?.nombre || 'Sin conductor';
+      conteo[nombre] = (conteo[nombre] || 0) + 1;
+    });
+
+    let r = 'Resumen por conductor:\n';
+    Object.entries(conteo).forEach(([nombre, total], i) => {
+      r += `${i + 1}. ${nombre} - ${total} pasajeros\n`;
+    });
+
+    return r;
+  }
+
   return 'Opción no válida';
 }
 
@@ -247,7 +334,9 @@ async function procesarConductor(usuario, texto) {
     const { data } = await supabase
       .from('vista_consolidacion_final_operativa')
       .select('*')
-      .limit(500);
+      .limit(1000);
+
+    if (!data || data.length === 0) return 'No hay datos';
 
     const filtrados = data.filter(p => {
       const comunaDB = normalizarTexto(campo(p, ['Comuna']));
@@ -255,6 +344,12 @@ async function procesarConductor(usuario, texto) {
     });
 
     if (filtrados.length === 0) return 'No hay pasajeros disponibles';
+
+    filtrados.sort((a, b) => {
+      const ha = campo(a, ['Hora de reserva']) || '';
+      const hb = campo(b, ['Hora de reserva']) || '';
+      return ha.localeCompare(hb);
+    });
 
     let r = 'Pasajeros disponibles:\n';
 
@@ -272,9 +367,9 @@ async function procesarMensaje(telefono, mensaje) {
   const usuario = await buscarUsuario(telefono);
   if (!usuario) return 'Número no autorizado';
 
-  const texto = mensaje.trim();
+  const texto = String(mensaje || '').trim();
 
-  if (texto.toLowerCase() === 'menu') {
+  if (texto.toLowerCase() === 'menu' || texto.toLowerCase() === 'hola') {
     if (esCoordinador(usuario.rol)) return menuCoordinador(usuario.nombre);
     if (esConductor(usuario.rol)) return menuConductor(usuario.nombre);
   }
@@ -291,12 +386,17 @@ async function procesarMensaje(telefono, mensaje) {
 }
 
 app.post('/twilio/webhook', async (req, res) => {
-  const telefono = req.body.From?.replace('whatsapp:', '');
-  const mensaje = req.body.Body;
+  try {
+    const telefono = req.body.From?.replace('whatsapp:', '');
+    const mensaje = req.body.Body || '';
 
-  const respuesta = await procesarMensaje(telefono, mensaje);
+    const respuesta = await procesarMensaje(telefono, mensaje);
 
-  return responderXml(res, respuesta);
+    return responderXml(res, respuesta);
+  } catch (error) {
+    console.error(error);
+    return responderXml(res, 'Error interno: ' + error.message);
+  }
 });
 
 app.listen(process.env.PORT || 3000, () => {
