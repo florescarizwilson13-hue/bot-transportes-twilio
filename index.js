@@ -24,7 +24,7 @@ function fechaOperacion() {
   return '2026-04-14';
 }
 
-function menuCoordinador() {
+function menu() {
   return `Hola Wilson
 Panel Coordinador
 
@@ -44,87 +44,61 @@ async function procesarMensaje(mensaje) {
   const fechaHoy = fechaOperacion();
 
   if (texto === 'hola' || texto === 'menu') {
-    return menuCoordinador();
+    return menu();
   }
 
+  // ================= 1 =================
   if (texto === '1') {
-  const { data, error } = await supabase
-    .from('usuarios')
-    .select('nombre, rol')
-    .limit(5);
+    const { data, error } = await supabase
+      .from('servicios_consolidados')
+      .select('hora_reserva')
+      .eq('fecha_reserva', fechaHoy);
 
-  if (error) return 'Error: ' + error.message;
-  if (!data || data.length === 0) return 'No hay datos en usuarios';
+    if (error) return 'Error traslados: ' + error.message;
+    if (!data || data.length === 0) return 'No hay traslados hoy';
 
-  let respuesta = 'Prueba Supabase OK:\n';
-  data.forEach((x, i) => {
-    respuesta += `${i + 1}. ${x.nombre} - ${x.rol}\n`;
-  });
+    return `Hay ${data.length} traslados hoy`;
+  }
 
-  return respuesta;
-}
-
+  // ================= 2 =================
   if (texto === '2') {
     const { data, error } = await supabase
       .from('usuarios')
-      .select('nombre, telefono_whatsapp, rol')
-      .eq('activo', true)
+      .select('nombre, telefono_whatsapp')
       .eq('rol', 'conductor')
-      .order('nombre');
+      .eq('activo', true);
 
-    if (error) return 'Error listando conductores: ' + error.message;
-    if (!data || data.length === 0) return 'No hay conductores activos';
+    if (error) return 'Error conductores: ' + error.message;
+    if (!data || data.length === 0) return 'No hay conductores';
 
-    let respuesta = 'Conductores:\n';
+    let r = 'Conductores:\n';
     data.forEach((c, i) => {
-      respuesta += `${i + 1}. ${c.nombre} - ${c.telefono_whatsapp || 'sin teléfono'}\n`;
+      r += `${i + 1}. ${c.nombre} - ${c.telefono_whatsapp}\n`;
     });
 
-    return respuesta;
+    return r;
   }
 
+  // ================= 3 =================
   if (texto === '3') {
     const { data, error } = await supabase
-      .from('asignaciones_coordinador')
-      .select('conductor_nombre, comuna')
-      .eq('fecha_operacion', fechaHoy)
-      .eq('activo', true)
-      .order('conductor_nombre')
-      .order('comuna');
+      .from('usuarios')
+      .select('nombre, comuna_asignada')
+      .eq('rol', 'conductor')
+      .eq('activo', true);
 
-    if (error) return 'Error listando comunas: ' + error.message;
-    if (!data || data.length === 0) return 'No hay asignaciones para hoy';
+    if (error) return 'Error comunas: ' + error.message;
+    if (!data || data.length === 0) return 'No hay comunas';
 
-    let respuesta = 'Asignaciones del día:\n';
-    data.forEach((x, i) => {
-      respuesta += `${i + 1}. ${x.conductor_nombre} - ${x.comuna}\n`;
+    let r = 'Comunas por conductor:\n';
+    data.forEach((c, i) => {
+      r += `${i + 1}. ${c.nombre} - ${c.comuna_asignada || 'sin comuna'}\n`;
     });
 
-    return respuesta;
+    return r;
   }
 
-  if (texto === '7') {
-    const { data, error } = await supabase
-      .from('reparto_pasajeros')
-      .select('conductor_id_actual');
-
-    if (error) return 'Error generando resumen: ' + error.message;
-    if (!data || data.length === 0) return 'No hay pasajeros repartidos';
-
-    const conteo = {};
-    data.forEach(x => {
-      const id = x.conductor_id_actual || 'Sin conductor';
-      conteo[id] = (conteo[id] || 0) + 1;
-    });
-
-    let respuesta = 'Resumen por conductor:\n';
-    Object.keys(conteo).forEach((k, i) => {
-      respuesta += `${i + 1}. ${k} - ${conteo[k]} pasajeros\n`;
-    });
-
-    return respuesta;
-  }
-
+  // ================= DEFAULT =================
   return 'No entiendo el comando. Escribe: menu';
 }
 
