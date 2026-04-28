@@ -20,86 +20,67 @@ function escapeXml(valor) {
     .replace(/>/g, '&gt;');
 }
 
-function fechaOperacion() {
-  return '2026-04-14';
-}
-
 function menu() {
-  return `Hola Wilson
-Panel Coordinador
+  return `Bot Transporte activo
 
-1. Ver traslados del día
-2. Ver conductores
-3. Ver comunas asignadas
-4. Ver pasajeros por comuna
-5. Asignar comuna a conductor
-6. Reasignar pasajero
-7. Resumen por conductor
+1. Ver traslados (test)
+2. Ver usuarios (test)
+3. Test conexión
 
-Escribe el número de opción`;
+Escribe opción`;
 }
 
 async function procesarMensaje(mensaje) {
   const texto = String(mensaje || '').trim().toLowerCase();
-  const fechaHoy = fechaOperacion();
 
   if (texto === 'hola' || texto === 'menu') {
     return menu();
   }
 
-  // ================= 1 =================
-  if (texto === '1') {
-    const { data, error } = await supabase
-      .from('servicios_consolidados')
-      .select('hora_reserva')
-      .eq('fecha_reserva', fechaHoy);
-
-    if (error) return 'Error traslados: ' + error.message;
-    if (!data || data.length === 0) return 'No hay traslados hoy';
-
-    return `Hay ${data.length} traslados hoy`;
-  }
-
-  // ================= 2 =================
-  if (texto === '2') {
-    const { data, error } = await supabase
-      .from('usuarios')
-      .select('nombre, telefono_whatsapp')
-      .eq('rol', 'conductor')
-      .eq('activo', true);
-
-    if (error) return 'Error conductores: ' + error.message;
-    if (!data || data.length === 0) return 'No hay conductores';
-
-    let r = 'Conductores:\n';
-    data.forEach((c, i) => {
-      r += `${i + 1}. ${c.nombre} - ${c.telefono_whatsapp}\n`;
-    });
-
-    return r;
-  }
-
-  // ================= 3 =================
+  // ================= TEST BASE =================
   if (texto === '3') {
     const { data, error } = await supabase
       .from('usuarios')
-      .select('nombre, comuna_asignada')
-      .eq('rol', 'conductor')
-      .eq('activo', true);
+      .select('*')
+      .limit(3);
 
-    if (error) return 'Error comunas: ' + error.message;
-    if (!data || data.length === 0) return 'No hay comunas';
+    if (error) return 'Error conexión: ' + error.message;
 
-    let r = 'Comunas por conductor:\n';
-    data.forEach((c, i) => {
-      r += `${i + 1}. ${c.nombre} - ${c.comuna_asignada || 'sin comuna'}\n`;
+    return `Conexión OK. Filas: ${data.length}`;
+  }
+
+  // ================= USUARIOS =================
+  if (texto === '2') {
+    const { data, error } = await supabase
+      .from('usuarios')
+      .select('*')
+      .limit(5);
+
+    if (error) return 'Error usuarios: ' + error.message;
+    if (!data || data.length === 0) return 'No hay usuarios';
+
+    let r = 'Usuarios:\n';
+
+    data.forEach((u, i) => {
+      r += `${i + 1}. ${JSON.stringify(u)}\n`;
     });
 
     return r;
   }
 
-  // ================= DEFAULT =================
-  return 'No entiendo el comando. Escribe: menu';
+  // ================= TRASLADOS =================
+  if (texto === '1') {
+    const { data, error } = await supabase
+      .from('servicios_consolidados')
+      .select('*')
+      .limit(3);
+
+    if (error) return 'Error traslados: ' + error.message;
+
+    return `Traslados encontrados: ${data.length}`;
+  }
+
+  return 'No entiendo. Escribe: menu';
 }
 
 app.post('/twilio/webhook', async (req, res) => {
