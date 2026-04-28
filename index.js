@@ -6,7 +6,7 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
-app.use(express.urlencoded({ extended: false })); // Necesario para Twilio
+app.use(express.urlencoded({ extended: false }));
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -86,18 +86,42 @@ ib HH:MM:SS
 tb HH:MM:SS`;
 }
 
+// ====================== LÓGICA CENTRAL ======================
+async function procesarMensaje({ telefono, mensaje }) {
+  if (!telefono || !mensaje) {
+    return 'Faltan telefono o mensaje';
+  }
+
+  const texto = String(mensaje).trim().toLowerCase();
+
+  if (texto === 'hola') {
+    return 'Recibido: hola';
+  }
+
+  if (texto === 'menu') {
+    return `Bot Transportes activo.
+
+Escribe:
+hola
+menu`;
+  }
+
+  return `Recibido: ${mensaje}`;
+}
+
 // ====================== TU WEBHOOK ORIGINAL ======================
 app.post('/webhook', async (req, res) => {
   try {
     const { telefono, mensaje } = req.body;
 
-    if (!telefono || !mensaje) {
-      return res.json({ ok: false, respuesta: 'Faltan telefono o mensaje' });
-    }
+    const respuesta = await procesarMensaje({
+      telefono,
+      mensaje
+    });
 
     return res.json({
       ok: true,
-      respuesta: `Recibido: ${mensaje}`
+      respuesta
     });
 
   } catch (err) {
@@ -111,27 +135,10 @@ app.post('/twilio/webhook', async (req, res) => {
     const telefono = req.body.From?.replace('whatsapp:', '');
     const mensaje = req.body.Body;
 
-    if (!telefono || !mensaje) {
-      res.type('text/xml');
-      return res.send(`
-<Response>
-  <Message>Error: mensaje inválido</Message>
-</Response>`);
-    }
-
-    const puerto = process.env.PORT || 3000;
-
-    const response = await fetch(`http://127.0.0.1:${puerto}/webhook`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        telefono,
-        mensaje
-      })
+    const respuesta = await procesarMensaje({
+      telefono,
+      mensaje
     });
-
-    const data = await response.json();
-    const respuesta = data?.respuesta || 'Sin respuesta del sistema';
 
     res.type('text/xml');
     return res.send(`
