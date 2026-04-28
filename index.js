@@ -13,6 +13,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// ================= FUNCIONES =================
+
 function normalizarTelefono(valor) {
   return String(valor || '').replace(/\D/g, '').trim();
 }
@@ -26,11 +28,6 @@ function escapeXml(valor) {
     .replace(/'/g, '&apos;');
 }
 
-// FECHA DE PRUEBA
-function fechaOperacion() {
-  return '2026-04-14';
-}
-
 function esCoordinador(rol) {
   return ['coordinador', 'admin', 'admin_general'].includes(String(rol || '').toLowerCase());
 }
@@ -41,6 +38,7 @@ function esConductor(rol) {
 
 function menuCoordinador(nombre) {
   return `Hola ${nombre}
+
 Panel Coordinador
 
 1. Ver traslados del día
@@ -51,7 +49,7 @@ Panel Coordinador
 6. Reasignar pasajero
 7. Resumen por conductor
 
-También puedes escribir comandos directos:
+Comandos:
 conductores
 comunas
 ver NOMBRE_COMUNA
@@ -62,6 +60,7 @@ resumen`;
 
 function menuConductor(nombre) {
   return `Hola ${nombre}
+
 Panel Conductor
 
 1. Ver mis comunas
@@ -74,76 +73,123 @@ Panel Conductor
 8. Iniciar bloque
 9. Terminar bloque
 
-También puedes escribir comandos directos:
+Comandos:
 comunas
 mispasajeros
 mios
 tomar CODIGO
 traspasar CODIGO TELEFONO
-bloques
-mb HH:MM:SS
-ib HH:MM:SS
-tb HH:MM:SS`;
+bloques`;
 }
 
-// ====================== LÓGICA CENTRAL ======================
-async function procesarMensaje({ telefono, mensaje }) {
-  if (!telefono || !mensaje) {
-    return 'Faltan telefono o mensaje';
-  }
+// ================= LOGICA PRINCIPAL =================
 
-  const texto = String(mensaje).trim().toLowerCase();
-
-  if (texto === 'hola') {
-    return 'Recibido: hola';
-  }
-
-  if (texto === 'menu') {
-    return `Bot Transportes activo.
-
-Escribe:
-hola
-menu`;
-  }
-
-  return `Recibido: ${mensaje}`;
-}
-
-// ====================== TU WEBHOOK ORIGINAL ======================
 app.post('/webhook', async (req, res) => {
   try {
-    const { telefono, mensaje } = req.body;
+    let { telefono, mensaje } = req.body;
 
-    const respuesta = await procesarMensaje({
-      telefono,
-      mensaje
-    });
+    if (!telefono || !mensaje) {
+      return res.json({
+        ok: false,
+        respuesta: 'Error: faltan datos'
+      });
+    }
 
+    telefono = normalizarTelefono(telefono);
+    mensaje = mensaje.toLowerCase().trim();
+
+    console.log('MENSAJE:', telefono, mensaje);
+
+    // ====== HOLA ======
+    if (mensaje === 'hola') {
+      return res.json({
+        ok: true,
+        respuesta: `Bot Transportes activo
+
+Escribe:
+menu`
+      });
+    }
+
+    // ====== MENU ======
+    if (mensaje === 'menu') {
+
+      // 🔥 TEMPORAL (luego lo conectamos a BD)
+      const nombre = 'Wilson';
+      const rol = 'admin';
+
+      if (esCoordinador(rol)) {
+        return res.json({
+          ok: true,
+          respuesta: menuCoordinador(nombre)
+        });
+      }
+
+      if (esConductor(rol)) {
+        return res.json({
+          ok: true,
+          respuesta: menuConductor(nombre)
+        });
+      }
+
+      return res.json({
+        ok: true,
+        respuesta: 'No tienes rol asignado'
+      });
+    }
+
+    // ====== DEFAULT ======
     return res.json({
       ok: true,
-      respuesta
+      respuesta: `No entiendo el comando
+
+Escribe:
+menu`
     });
 
   } catch (err) {
-    return res.json({ ok: false, respuesta: err.message });
+    console.error(err);
+    return res.json({
+      ok: false,
+      respuesta: 'Error interno'
+    });
   }
 });
 
-// ====================== TWILIO ======================
+// ================= TWILIO =================
+
 app.post('/twilio/webhook', async (req, res) => {
   try {
     const telefono = req.body.From?.replace('whatsapp:', '');
     const mensaje = req.body.Body;
 
-    const respuesta = await procesarMensaje({
-      telefono,
-      mensaje
+    console.log('TWILIO:', telefono, mensaje);
+
+    if (!telefono || !mensaje) {
+      res.type('text/xml');
+      return res.send(`
+<Response>
+  <Message>Error mensaje inválido</Message>
+</Response>`);
+    }
+
+    const puerto = process.env.PORT || 3000;
+
+    const response = await fetch(`http://127.0.0.1:${puerto}/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        telefono,
+        mensaje
+      })
     });
+
+    const data = await response.json();
 
     res.type('text/xml');
     return res.send(`
 <Response>
-  <Message>${escapeXml(respuesta)}</Message>
+  <Message>${escapeXml(data.respuesta)}</Message>
 </Response>`);
 
   } catch (error) {
@@ -157,7 +203,8 @@ app.post('/twilio/webhook', async (req, res) => {
   }
 });
 
-// ====================== START ======================
+// ================= START =================
+
 app.listen(process.env.PORT || 3000, () => {
   console.log(`Servidor corriendo en puerto ${process.env.PORT || 3000}`);
 });
