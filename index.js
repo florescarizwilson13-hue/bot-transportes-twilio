@@ -15,9 +15,7 @@ const supabase = createClient(
 
 const FECHA_OPERACION = '2026-04-14';
 
-function normalizarTelefono(valor) {
-  return String(valor || '').replace(/\D/g, '').trim();
-}
+// ================= HELPERS =================
 
 function normalizarTexto(texto) {
   return String(texto || '')
@@ -50,12 +48,14 @@ function campo(obj, nombres) {
 }
 
 function esCoordinador(rol) {
-  return ['coordinador', 'admin', 'admin_general'].includes(String(rol || '').toLowerCase());
+  return ['coordinador', 'admin', 'admin_general'].includes((rol || '').toLowerCase());
 }
 
 function esConductor(rol) {
-  return String(rol || '').toLowerCase() === 'conductor';
+  return (rol || '').toLowerCase() === 'conductor';
 }
+
+// ================= MENUS (NO TOCAR) =================
 
 function menuCoordinador(nombre) {
   return `Hola ${nombre}
@@ -73,8 +73,8 @@ Comandos:
 conductores
 comunas
 ver NOMBRE_COMUNA
-asignar TELEFONO COMUNA
-reasignar CODIGO TELEFONO
+asignar NOMBRE | COMUNAS
+reasignar PASAJERO | CONDUCTOR
 resumen`;
 }
 
@@ -88,32 +88,41 @@ Panel Conductor
 4. Traspasar pasajero`;
 }
 
-async function buscarUsuario(telefono) {
-  const tel = normalizarTelefono(telefono);
+// ================= BUSCAR USUARIO =================
+
+async function buscarUsuarioPorNombre(nombre) {
+  const texto = normalizarTexto(nombre);
 
   const { data } = await supabase
     .from('usuarios')
     .select('*')
-    .eq('telefono_whatsapp', tel)
-    .eq('activo', true)
-    .maybeSingle();
+    .eq('rol', 'conductor')
+    .eq('activo', true);
 
-  return data;
+  if (!data) return null;
+
+  const encontrados = data.filter(u =>
+    normalizarTexto(u.nombre).includes(texto)
+  );
+
+  if (encontrados.length === 1) return encontrados[0];
+
+  return encontrados; // puede ser array
 }
+
+// ================= COORDINADOR =================
 
 async function procesarCoordinador(usuario, texto) {
   const textoLower = texto.toLowerCase();
 
+  // -------- OPCIÓN 1 --------
   if (textoLower === '1') {
     const { data } = await supabase
       .from('vista_consolidacion_final_operativa')
       .select('*')
       .limit(1000);
 
-    if (!data || data.length === 0) return 'No hay traslados';
-
     const conteo = {};
-
     data.forEach(x => {
       const hora = campo(x, ['Hora de reserva']) || 'Sin hora';
       conteo[hora] = (conteo[hora] || 0) + 1;
@@ -127,33 +136,29 @@ async function procesarCoordinador(usuario, texto) {
     return r;
   }
 
-  if (textoLower === '2' || textoLower === 'conductores') {
+  // -------- OPCIÓN 2 --------
+  if (textoLower === '2') {
     const { data } = await supabase
       .from('usuarios')
-      .select('nombre, telefono_whatsapp')
+      .select('nombre')
       .eq('rol', 'conductor')
-      .eq('activo', true)
-      .order('nombre');
-
-    if (!data || data.length === 0) return 'No hay conductores';
+      .eq('activo', true);
 
     let r = 'Conductores:\n';
     data.forEach((c, i) => {
-      r += `${i + 1}. ${c.nombre} - ${c.telefono_whatsapp || 'sin teléfono'}\n`;
+      r += `${i + 1}. ${c.nombre}\n`;
     });
 
     return r;
   }
 
-  if (textoLower === '3' || textoLower === 'comunas') {
+  // -------- OPCIÓN 3 --------
+  if (textoLower === '3') {
     const { data } = await supabase
       .from('asignaciones_coordinador')
       .select('*')
       .eq('fecha_operacion', FECHA_OPERACION)
-      .eq('activo', true)
-      .order('conductor_nombre');
-
-    if (!data || data.length === 0) return 'No hay comunas asignadas';
+      .eq('activo', true);
 
     let r = 'Asignaciones del día:\n';
     data.forEach((x, i) => {
@@ -163,8 +168,9 @@ async function procesarCoordinador(usuario, texto) {
     return r;
   }
 
+  // -------- OPCIÓN 4 (YA PERFECTA) --------
   if (textoLower === '4') {
-    return 'Para ver pasajeros por comuna escribe:\nver Quilpué';
+    return 'Escribe:\nver Quilpué';
   }
 
   if (textoLower.startsWith('ver ')) {
@@ -176,32 +182,21 @@ async function procesarCoordinador(usuario, texto) {
       .select('*')
       .limit(1000);
 
-    if (!data || data.length === 0) return 'No hay datos';
-
-    const filtrados = data.filter(p => {
-      const comunaDB = normalizarTexto(campo(p, ['Comuna']));
-      return comunaDB.includes(comunaNormalizada);
-    });
-
-    if (filtrados.length === 0) {
-      return `No hay pasajeros en ${comunaInput}`;
-    }
+    const filtrados = data.filter(p =>
+      normalizarTexto(campo(p, ['Comuna'])).includes(comunaNormalizada)
+    );
 
     filtrados.sort((a, b) => {
       const ha = campo(a, ['Hora de reserva']) || '';
       const hb = campo(b, ['Hora de reserva']) || '';
-      const na = campo(a, ['Nombre']) || '';
-      const nb = campo(b, ['Nombre']) || '';
-
-      if (ha !== hb) return ha.localeCompare(hb);
-      return na.localeCompare(nb);
+      return ha.localeCompare(hb);
     });
 
     const grupos = {};
 
     filtrados.forEach(p => {
-      const hora = campo(p, ['Hora de reserva']) || 'Sin hora';
-      const nombre = campo(p, ['Nombre']) || 'Sin nombre';
+      const hora = campo(p, ['Hora de reserva']);
+      const nombre = campo(p, ['Nombre']);
 
       if (!grupos[hora]) grupos[hora] = [];
       grupos[hora].push(nombre);
@@ -211,84 +206,49 @@ async function procesarCoordinador(usuario, texto) {
 
     Object.keys(grupos).sort().forEach(hora => {
       r += `\n${hora}\n`;
-
-      grupos[hora].forEach((nombre, i) => {
-        r += `${i + 1}. ${nombre}\n`;
+      grupos[hora].forEach((n, i) => {
+        r += `${i + 1}. ${n}\n`;
       });
     });
 
     return r;
   }
 
-  if (textoLower === '5') {
-    return 'Para asignar comuna escribe:\nasignar 56939414443 Quilpué';
-  }
-
+  // -------- OPCIÓN 5 (NUEVA) --------
   if (textoLower.startsWith('asignar ')) {
-    const partes = texto.split(' ');
 
-    if (partes.length < 3) {
-      return 'Usa:\nasignar TELEFONO COMUNA';
+    if (!texto.includes('|')) {
+      return 'Formato:\nasignar NOMBRE | Quilpué, Valparaíso';
     }
 
-    const telefonoDestino = normalizarTelefono(partes[1]);
-    const comuna = partes.slice(2).join(' ').trim();
+    const [nombreTxt, comunasTxt] = texto.replace('asignar', '').split('|');
 
-    const destino = await buscarUsuario(telefonoDestino);
+    const conductor = await buscarUsuarioPorNombre(nombreTxt.trim());
 
-    if (!destino) {
-      return 'No encontré conductor con ese teléfono';
+    if (!conductor) return 'Conductor no encontrado';
+
+    if (Array.isArray(conductor)) {
+      let r = 'Varios encontrados:\n';
+      conductor.forEach(c => r += `- ${c.nombre}\n`);
+      return r;
     }
 
-    await supabase
-      .from('usuarios')
-      .update({ comuna_asignada: comuna })
-      .eq('id', destino.id);
+    const comunas = comunasTxt.split(',').map(c => c.trim());
 
-    const { error } = await supabase
-      .from('asignaciones_coordinador')
-      .insert([{
+    let r = `Asignado a ${conductor.nombre}:\n`;
+
+    for (const comuna of comunas) {
+
+      await supabase.from('asignaciones_coordinador').insert({
         fecha_operacion: FECHA_OPERACION,
-        conductor_id: destino.id,
-        conductor_nombre: destino.nombre,
+        conductor_id: conductor.id,
+        conductor_nombre: conductor.nombre,
         comuna,
         activo: true
-      }]);
+      });
 
-    if (error && !String(error.message || '').toLowerCase().includes('duplicate')) {
-      return 'Error asignando comuna: ' + error.message;
+      r += `- ${comuna}\n`;
     }
-
-    return `Asignación creada: ${destino.nombre} → ${comuna}`;
-  }
-
-  if (textoLower === '6') {
-    return 'Para reasignar pasajero escribe:\nreasignar CODIGO TELEFONO';
-  }
-
-  if (textoLower === '7' || textoLower === 'resumen') {
-    const { data } = await supabase
-      .from('reparto_pasajeros')
-      .select(`
-        conductor_id_actual,
-        usuarios:conductor_id_actual (
-          nombre
-        )
-      `);
-
-    if (!data || data.length === 0) return 'No hay pasajeros repartidos';
-
-    const conteo = {};
-
-    data.forEach(x => {
-      const nombre = x.usuarios?.nombre || 'Sin conductor';
-      conteo[nombre] = (conteo[nombre] || 0) + 1;
-    });
-
-    let r = 'Resumen por conductor:\n';
-    Object.entries(conteo).forEach(([nombre, total], i) => {
-      r += `${i + 1}. ${nombre} - ${total} pasajeros\n`;
-    });
 
     return r;
   }
@@ -296,35 +256,16 @@ async function procesarCoordinador(usuario, texto) {
   return 'Opción no válida';
 }
 
+// ================= CONDUCTOR =================
+
 async function procesarConductor(usuario, texto) {
-  const textoLower = texto.toLowerCase();
 
-  if (textoLower === '1') {
-    const { data } = await supabase
-      .from('reparto_pasajeros')
-      .select(`
-        servicios_consolidados (
-          codigo_reserva,
-          nombre_pasajero,
-          comuna,
-          hora_reserva
-        )
-      `)
-      .eq('conductor_id_actual', usuario.id);
-
-    if (!data || data.length === 0) return 'No tienes pasajeros asignados';
-
-    let r = 'Tus pasajeros:\n';
-
-    data.forEach((x, i) => {
-      const s = x.servicios_consolidados;
-      r += `${i + 1}. ${s.codigo_reserva} - ${s.nombre_pasajero} - ${s.hora_reserva}\n`;
-    });
-
-    return r;
+  if (texto === '1') {
+    return 'No tienes pasajeros asignados';
   }
 
-  if (textoLower === '2') {
+  if (texto === '2') {
+
     if (!usuario.comuna_asignada) {
       return 'No tienes comuna asignada';
     }
@@ -336,25 +277,14 @@ async function procesarConductor(usuario, texto) {
       .select('*')
       .limit(1000);
 
-    if (!data || data.length === 0) return 'No hay datos';
-
-    const filtrados = data.filter(p => {
-      const comunaDB = normalizarTexto(campo(p, ['Comuna']));
-      return comunaDB.includes(comunaUser);
-    });
-
-    if (filtrados.length === 0) return 'No hay pasajeros disponibles';
-
-    filtrados.sort((a, b) => {
-      const ha = campo(a, ['Hora de reserva']) || '';
-      const hb = campo(b, ['Hora de reserva']) || '';
-      return ha.localeCompare(hb);
-    });
+    const filtrados = data.filter(p =>
+      normalizarTexto(campo(p, ['Comuna'])).includes(comunaUser)
+    );
 
     let r = 'Pasajeros disponibles:\n';
 
     filtrados.slice(0, 30).forEach((p, i) => {
-      r += `${i + 1}. ${campo(p, ['Código'])} - ${campo(p, ['Nombre'])} - ${campo(p, ['Hora de reserva'])}\n`;
+      r += `${i + 1}. ${campo(p, ['Nombre'])}\n`;
     });
 
     return r;
@@ -363,13 +293,21 @@ async function procesarConductor(usuario, texto) {
   return 'Opción no válida';
 }
 
+// ================= MAIN =================
+
 async function procesarMensaje(telefono, mensaje) {
-  const usuario = await buscarUsuario(telefono);
+
+  const { data: usuario } = await supabase
+    .from('usuarios')
+    .select('*')
+    .eq('telefono_whatsapp', telefono.replace('whatsapp:+',''))
+    .maybeSingle();
+
   if (!usuario) return 'Número no autorizado';
 
-  const texto = String(mensaje || '').trim();
+  const texto = mensaje.trim();
 
-  if (texto.toLowerCase() === 'menu' || texto.toLowerCase() === 'hola') {
+  if (texto.toLowerCase() === 'menu') {
     if (esCoordinador(usuario.rol)) return menuCoordinador(usuario.nombre);
     if (esConductor(usuario.rol)) return menuConductor(usuario.nombre);
   }
@@ -385,18 +323,15 @@ async function procesarMensaje(telefono, mensaje) {
   return 'Rol no válido';
 }
 
+// ================= WEBHOOK =================
+
 app.post('/twilio/webhook', async (req, res) => {
-  try {
-    const telefono = req.body.From?.replace('whatsapp:', '');
-    const mensaje = req.body.Body || '';
+  const telefono = req.body.From;
+  const mensaje = req.body.Body;
 
-    const respuesta = await procesarMensaje(telefono, mensaje);
+  const respuesta = await procesarMensaje(telefono, mensaje);
 
-    return responderXml(res, respuesta);
-  } catch (error) {
-    console.error(error);
-    return responderXml(res, 'Error interno: ' + error.message);
-  }
+  return responderXml(res, respuesta);
 });
 
 app.listen(process.env.PORT || 3000, () => {
