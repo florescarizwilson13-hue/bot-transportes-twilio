@@ -312,7 +312,8 @@ async function procesarConductor(usuario, texto) {
       return 'No tienes comunas asignadas';
     }
 
-    const comunas = asignaciones.map(a => normalizarTexto(a.comuna));
+    const comunasOriginales = asignaciones.map(a => a.comuna).filter(Boolean);
+    const comunasNormalizadas = comunasOriginales.map(c => normalizarTexto(c));
 
     const { data } = await supabase
       .from('vista_consolidacion_final_operativa')
@@ -325,11 +326,11 @@ async function procesarConductor(usuario, texto) {
 
     const filtrados = data.filter(p => {
       const comunaDB = normalizarTexto(campo(p, ['Comuna']));
-      return comunas.some(c => comunaDB.includes(c));
+      return comunasNormalizadas.some(c => comunaDB.includes(c));
     });
 
     if (!filtrados || filtrados.length === 0) {
-      return 'No hay pasajeros disponibles para tus comunas';
+      return `No hay pasajeros disponibles para tus comunas: ${comunasOriginales.join(', ')}`;
     }
 
     filtrados.sort((a, b) => {
@@ -347,18 +348,19 @@ async function procesarConductor(usuario, texto) {
     filtrados.forEach(p => {
       const hora = campo(p, ['Hora de reserva']) || 'Sin hora';
       const nombre = campo(p, ['Nombre']) || 'Sin nombre';
+      const comuna = campo(p, ['Comuna']) || 'Sin comuna';
 
       if (!grupos[hora]) grupos[hora] = [];
-      grupos[hora].push(nombre);
+      grupos[hora].push({ nombre, comuna });
     });
 
-    let r = 'Pasajeros disponibles:\n';
+    let r = `Pasajeros disponibles\nComunas asignadas: ${comunasOriginales.join(', ')}\n`;
 
     Object.keys(grupos).sort().forEach(hora => {
       r += `\n${hora}\n`;
 
-      grupos[hora].forEach((nombre, i) => {
-        r += `${i + 1}. ${nombre}\n`;
+      grupos[hora].forEach((p, i) => {
+        r += `${i + 1}. ${p.nombre} - ${p.comuna}\n`;
       });
     });
 
