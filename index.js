@@ -87,7 +87,9 @@ Panel Conductor
 2. Ver pasajeros disponibles por salida
 3. Tomar pasajero
 4. Traspasar pasajero
-5. Ver conductores`;
+5. Ver conductores
+6. Iniciar servicio
+7. Terminar servicio`;
 }
 
 async function buscarUsuarioPorNombre(nombre) {
@@ -647,8 +649,7 @@ async function procesarConductor(usuario, texto) {
     }
 
     const pasajero = item.servicios_consolidados || {};
-
-    sesionesConductor[usuario.id] = null;
+    delete sesionesConductor[usuario.id];
 
     return `✔ Pasajero traspasado:
 ${pasajero.nombre_pasajero || 'Sin nombre'}
@@ -657,6 +658,55 @@ a ${conductorDestino.nombre}`;
 
   if (opcion === '5') {
     return await verConductores();
+  }
+
+  if (opcion === '6') {
+    const capacidad = Number(usuario.capacidad || 11);
+
+    const { data, error } = await supabase
+      .from('reparto_pasajeros')
+      .select('id')
+      .eq('conductor_id_actual', usuario.id);
+
+    if (error) return 'Error validando capacidad: ' + error.message;
+
+    const total = data ? data.length : 0;
+
+    if (total === 0) {
+      return 'No puedes iniciar servicio. No tienes pasajeros asignados.';
+    }
+
+    if (total > capacidad) {
+      return `No puedes iniciar servicio.
+
+Pasajeros: ${total}
+Capacidad: ${capacidad}
+Debes traspasar ${total - capacidad} pasajero(s).`;
+    }
+
+    return `Servicio iniciado correctamente.
+
+Pasajeros: ${total}
+Capacidad: ${capacidad}`;
+  }
+
+  if (opcion === '7') {
+    const { data, error } = await supabase
+      .from('reparto_pasajeros')
+      .select('id')
+      .eq('conductor_id_actual', usuario.id);
+
+    if (error) return 'Error terminando servicio: ' + error.message;
+
+    const total = data ? data.length : 0;
+
+    if (total === 0) {
+      return 'No tienes pasajeros asignados para terminar servicio.';
+    }
+
+    return `Servicio terminado correctamente.
+
+Pasajeros gestionados: ${total}`;
   }
 
   return 'Opción no válida';
