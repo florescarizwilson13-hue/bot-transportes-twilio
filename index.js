@@ -349,12 +349,57 @@ async function obtenerPasajerosDisponiblesConductor(usuario) {
   };
 }
 
+async function buscarServicioIdPorCodigo(codigo) {
+  const codigoLimpio = String(codigo || '').trim();
+
+  if (!codigoLimpio) return null;
+
+  const { data, error } = await supabase
+    .from('servicios_consolidados')
+    .select('id')
+    .eq('codigo_reserva', codigoLimpio)
+    .maybeSingle();
+
+  if (error) return null;
+  return data?.id || null;
+}
+
 async function procesarConductor(usuario, texto) {
   const opcion = String(texto || '').trim().toLowerCase();
   const sesion = sesionesConductor[usuario.id];
 
   if (opcion === '1') {
-    return 'No tienes pasajeros asignados';
+    const { data, error } = await supabase
+      .from('reparto_pasajeros')
+      .select(`
+        servicio_id,
+        estado,
+        servicios_consolidados (
+          codigo_reserva,
+          nombre_pasajero,
+          comuna,
+          hora_reserva
+        )
+      `)
+      .eq('conductor_id_actual', usuario.id);
+
+    if (error) return 'Error viendo mis pasajeros: ' + error.message;
+    if (!data || data.length === 0) return 'No tienes pasajeros asignados';
+
+    data.sort((a, b) => {
+      const ha = a.servicios_consolidados?.hora_reserva || '';
+      const hb = b.servicios_consolidados?.hora_reserva || '';
+      return ha.localeCompare(hb);
+    });
+
+    let r = 'Mis pasajeros:\n';
+
+    data.forEach((x, i) => {
+      const p = x.servicios_consolidados || {};
+      r += `${i + 1}. ${horaCorta(p.hora_reserva)} - ${p.nombre_pasajero || 'Sin nombre'} - ${p.comuna || 'Sin comuna'}\n`;
+    });
+
+    return r;
   }
 
   if (opcion === '2') {
@@ -448,10 +493,13 @@ async function procesarConductor(usuario, texto) {
     let r = 'Pasajeros tomados:\n';
 
     for (const p of seleccionados) {
-      const servicioId = campo(p, ['id']);
+      const codigo = campo(p, ['Código']);
+      const nombre = campo(p, ['Nombre']) || 'Sin nombre';
+
+      const servicioId = await buscarServicioIdPorCodigo(codigo);
 
       if (!servicioId) {
-        r += `⚠ ${campo(p, ['Nombre']) || 'Sin nombre'} sin ID\n`;
+        r += `⚠ ${nombre} no encontrado en servicios\n`;
         continue;
       }
 
@@ -462,17 +510,17 @@ async function procesarConductor(usuario, texto) {
         .maybeSingle();
 
       if (existe && existe.conductor_id_actual && existe.conductor_id_actual !== usuario.id) {
-        r += `⚠ ${campo(p, ['Nombre'])} ya tomado por otro conductor\n`;
+        r += `⚠ ${nombre} ya tomado por otro conductor\n`;
         continue;
       }
 
       if (existe && existe.conductor_id_actual === usuario.id) {
-        r += `⚠ ${campo(p, ['Nombre'])} ya está en tu lista\n`;
+        r += `⚠ ${nombre} ya está en tu lista\n`;
         continue;
       }
 
       if (existe) {
-        await supabase
+        const { error } = await supabase
           .from('reparto_pasajeros')
           .update({
             conductor_id_actual: usuario.id,
@@ -481,8 +529,13 @@ async function procesarConductor(usuario, texto) {
             updated_at: new Date().toISOString()
           })
           .eq('id', existe.id);
+
+        if (error) {
+          r += `⚠ Error con ${nombre}: ${error.message}\n`;
+          continue;
+        }
       } else {
-        await supabase
+        const { error } = await supabase
           .from('reparto_pasajeros')
           .insert({
             servicio_id: servicioId,
@@ -490,9 +543,14 @@ async function procesarConductor(usuario, texto) {
             conductor_id_original: usuario.id,
             estado: 'tomado'
           });
+
+        if (error) {
+          r += `⚠ Error con ${nombre}: ${error.message}\n`;
+          continue;
+        }
       }
 
-      r += `✔ ${campo(p, ['Nombre'])}\n`;
+      r += `✔ ${nombre}\n`;
     }
 
     return r;
