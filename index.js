@@ -296,11 +296,11 @@ async function procesarCoordinador(usuario, texto) {
 }
 
 async function procesarConductor(usuario, texto) {
-  if (texto === '1') {
+  if (opcion === '1') {
     return 'No tienes pasajeros asignados';
   }
 
-  if (texto === '2') {
+  if (opcion === '2') {
     const { data: asignaciones } = await supabase
       .from('asignaciones_coordinador')
       .select('comuna')
