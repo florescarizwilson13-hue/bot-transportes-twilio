@@ -15,7 +15,6 @@ const supabase = createClient(
 
 const FECHA_OPERACION = '2026-04-14';
 
-// Memoria temporal para selección de salidas por conductor
 const sesionesConductor = {};
 
 function normalizarTexto(texto) {
@@ -354,6 +353,36 @@ async function obtenerPasajerosDisponiblesConductor(usuario) {
 async function procesarConductor(usuario, texto) {
   const opcion = String(texto || '').trim();
 
+  const sesion = sesionesConductor[usuario.id];
+
+  if (sesion && sesion.tipo === 'seleccion_salida' && /^\d+$/.test(opcion)) {
+    const edad = Date.now() - sesion.creado;
+
+    if (edad > 10 * 60 * 1000) {
+      delete sesionesConductor[usuario.id];
+      return 'La selección expiró. Escribe 2 nuevamente.';
+    }
+
+    const indice = Number(opcion) - 1;
+    const hora = sesion.horas[indice];
+
+    if (!hora) {
+      return 'Número de salida no válido. Escribe 2 para ver las salidas.';
+    }
+
+    const pasajeros = sesion.pasajerosPorHora[hora] || [];
+
+    let r = `Pasajeros salida ${horaCorta(hora)}:\n`;
+
+    pasajeros.forEach((p, i) => {
+      const nombre = campo(p, ['Nombre']) || 'Sin nombre';
+      const comuna = campo(p, ['Comuna']) || 'Sin comuna';
+      r += `${i + 1}. ${nombre} - ${comuna}\n`;
+    });
+
+    return r;
+  }
+
   if (opcion === '1') {
     return 'No tienes pasajeros asignados';
   }
@@ -388,36 +417,6 @@ async function procesarConductor(usuario, texto) {
     });
 
     r += '\nResponde con el número de la salida.';
-
-    return r;
-  }
-
-  const sesion = sesionesConductor[usuario.id];
-
-  if (sesion && sesion.tipo === 'seleccion_salida' && /^\d+$/.test(opcion)) {
-    const edad = Date.now() - sesion.creado;
-
-    if (edad > 10 * 60 * 1000) {
-      delete sesionesConductor[usuario.id];
-      return 'La selección expiró. Escribe 2 nuevamente.';
-    }
-
-    const indice = Number(opcion) - 1;
-    const hora = sesion.horas[indice];
-
-    if (!hora) {
-      return 'Número de salida no válido. Escribe 2 para ver las salidas.';
-    }
-
-    const pasajeros = sesion.pasajerosPorHora[hora] || [];
-
-    let r = `Pasajeros salida ${horaCorta(hora)}:\n`;
-
-    pasajeros.forEach((p, i) => {
-      const nombre = campo(p, ['Nombre']) || 'Sin nombre';
-      const comuna = campo(p, ['Comuna']) || 'Sin comuna';
-      r += `${i + 1}. ${nombre} - ${comuna}\n`;
-    });
 
     return r;
   }
