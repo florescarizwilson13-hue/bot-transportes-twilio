@@ -15,12 +15,19 @@ const supabase = createClient(
 
 const FECHA_OPERACION = '2026-04-14';
 
+// Memoria temporal para selección de salidas por conductor
+const sesionesConductor = {};
+
 function normalizarTexto(texto) {
   return String(texto || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
+}
+
+function horaCorta(hora) {
+  return String(hora || 'Sin hora').slice(0, 5);
 }
 
 function escapeXml(valor) {
@@ -79,7 +86,7 @@ function menuConductor(nombre) {
 Panel Conductor
 
 1. Ver mis pasajeros
-2. Ver pasajeros disponibles
+2. Ver pasajeros disponibles por salida
 3. Tomar pasajero
 4. Traspasar pasajero`;
 }
@@ -211,7 +218,7 @@ async function procesarCoordinador(usuario, texto) {
     let r = `Pasajeros en ${comunaInput}:\n`;
 
     Object.keys(grupos).sort().forEach(hora => {
-      r += `\n${hora}\n`;
+      r += `\n${horaCorta(hora)}\n`;
       grupos[hora].forEach((n, i) => {
         r += `${i + 1}. ${n}\n`;
       });
@@ -295,6 +302,55 @@ async function procesarCoordinador(usuario, texto) {
   return 'Opción no válida';
 }
 
+async function obtenerPasajerosDisponiblesConductor(usuario) {
+  const { data: asignaciones } = await supabase
+    .from('asignaciones_coordinador')
+    .select('comuna')
+    .eq('fecha_operacion', FECHA_OPERACION)
+    .eq('conductor_id', usuario.id)
+    .eq('activo', true);
+
+  if (!asignaciones || asignaciones.length === 0) {
+    return { error: 'No tienes comunas asignadas' };
+  }
+
+  const comunasOriginales = asignaciones.map(a => a.comuna).filter(Boolean);
+  const comunasNormalizadas = comunasOriginales.map(c => normalizarTexto(c));
+
+  const { data } = await supabase
+    .from('vista_consolidacion_final_operativa')
+    .select('*')
+    .limit(1000);
+
+  if (!data || data.length === 0) {
+    return { error: 'No hay datos de pasajeros' };
+  }
+
+  const filtrados = data.filter(p => {
+    const comunaDB = normalizarTexto(campo(p, ['Comuna']));
+    return comunasNormalizadas.some(c => comunaDB.includes(c));
+  });
+
+  if (!filtrados || filtrados.length === 0) {
+    return { error: `No hay pasajeros disponibles para tus comunas: ${comunasOriginales.join(', ')}` };
+  }
+
+  filtrados.sort((a, b) => {
+    const ha = campo(a, ['Hora de reserva']) || '';
+    const hb = campo(b, ['Hora de reserva']) || '';
+    const na = campo(a, ['Nombre']) || '';
+    const nb = campo(b, ['Nombre']) || '';
+
+    if (ha !== hb) return ha.localeCompare(hb);
+    return na.localeCompare(nb);
+  });
+
+  return {
+    comunasOriginales,
+    pasajeros: filtrados
+  };
+}
+
 async function procesarConductor(usuario, texto) {
   const opcion = String(texto || '').trim();
 
@@ -303,64 +359,75 @@ async function procesarConductor(usuario, texto) {
   }
 
   if (opcion === '2') {
-    const { data: asignaciones } = await supabase
-      .from('asignaciones_coordinador')
-      .select('comuna')
-      .eq('fecha_operacion', FECHA_OPERACION)
-      .eq('conductor_id', usuario.id)
-      .eq('activo', true);
+    const resultado = await obtenerPasajerosDisponiblesConductor(usuario);
 
-    if (!asignaciones || asignaciones.length === 0) {
-      return 'No tienes comunas asignadas';
-    }
+    if (resultado.error) return resultado.error;
 
-    const comunasOriginales = asignaciones.map(a => a.comuna).filter(Boolean);
-    const comunasNormalizadas = comunasOriginales.map(c => normalizarTexto(c));
+    const grupos = {};
 
-    const { data } = await supabase
-      .from('vista_consolidacion_final_operativa')
-      .select('*')
-      .limit(1000);
-
-    if (!data || data.length === 0) {
-      return 'No hay datos de pasajeros';
-    }
-
-    const filtrados = data.filter(p => {
-      const comunaDB = normalizarTexto(campo(p, ['Comuna']));
-      return comunasNormalizadas.some(c => comunaDB.includes(c));
-    });
-
-    if (!filtrados || filtrados.length === 0) {
-      return `No hay pasajeros disponibles para tus comunas: ${comunasOriginales.join(', ')}`;
-    }
-
-    filtrados.sort((a, b) => {
-      const ha = campo(a, ['Hora de reserva']) || '';
-      const hb = campo(b, ['Hora de reserva']) || '';
-      const na = campo(a, ['Nombre']) || '';
-      const nb = campo(b, ['Nombre']) || '';
-
-      if (ha !== hb) return ha.localeCompare(hb);
-      return na.localeCompare(nb);
-    });
-
-    const LIMITE = 15;
-    let r = `Pasajeros disponibles\nComunas asignadas: ${comunasOriginales.join(', ')}\n`;
-
-    filtrados.slice(0, LIMITE).forEach((p, i) => {
+    resultado.pasajeros.forEach(p => {
       const hora = campo(p, ['Hora de reserva']) || 'Sin hora';
-      const nombre = campo(p, ['Nombre']) || 'Sin nombre';
-      const comuna = campo(p, ['Comuna']) || 'Sin comuna';
 
-      r += `${i + 1}. ${hora} - ${nombre} - ${comuna}\n`;
+      if (!grupos[hora]) grupos[hora] = [];
+      grupos[hora].push(p);
     });
 
-    if (filtrados.length > LIMITE) {
-      r += `\nMostrando ${LIMITE} de ${filtrados.length} pasajeros.`;
-    }
+    const horas = Object.keys(grupos).sort();
+
+    sesionesConductor[usuario.id] = {
+      tipo: 'seleccion_salida',
+      creado: Date.now(),
+      horas,
+      pasajerosPorHora: grupos
+    };
+
+    let r = `Tus salidas disponibles\nComunas: ${resultado.comunasOriginales.join(', ')}\n`;
+
+    horas.forEach((hora, i) => {
+      r += `${i + 1}. ${horaCorta(hora)} - ${grupos[hora].length} pasajeros\n`;
+    });
+
+    r += '\nResponde con el número de la salida.';
 
     return r;
+  }
+
+  const sesion = sesionesConductor[usuario.id];
+
+  if (sesion && sesion.tipo === 'seleccion_salida' && /^\d+$/.test(opcion)) {
+    const edad = Date.now() - sesion.creado;
+
+    if (edad > 10 * 60 * 1000) {
+      delete sesionesConductor[usuario.id];
+      return 'La selección expiró. Escribe 2 nuevamente.';
+    }
+
+    const indice = Number(opcion) - 1;
+    const hora = sesion.horas[indice];
+
+    if (!hora) {
+      return 'Número de salida no válido. Escribe 2 para ver las salidas.';
+    }
+
+    const pasajeros = sesion.pasajerosPorHora[hora] || [];
+
+    let r = `Pasajeros salida ${horaCorta(hora)}:\n`;
+
+    pasajeros.forEach((p, i) => {
+      const nombre = campo(p, ['Nombre']) || 'Sin nombre';
+      const comuna = campo(p, ['Comuna']) || 'Sin comuna';
+      r += `${i + 1}. ${nombre} - ${comuna}\n`;
+    });
+
+    return r;
+  }
+
+  if (opcion === '3') {
+    return 'Para tomar pasajero escribe:\ntomar NOMBRE PASAJERO';
+  }
+
+  if (opcion === '4') {
+    return 'Para traspasar pasajero escribe:\ntraspasar PASAJERO | CONDUCTOR';
   }
 
   return 'Opción no válida';
