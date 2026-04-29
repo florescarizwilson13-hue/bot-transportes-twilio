@@ -303,9 +303,64 @@ async function procesarConductor(usuario, texto) {
   }
 
   if (opcion === '2') {
-    return `OK opción 2 conductor detectada.
-Conductor: ${usuario.nombre}
-ID: ${usuario.id}`;
+    const { data: asignaciones } = await supabase
+      .from('asignaciones_coordinador')
+      .select('comuna')
+      .eq('fecha_operacion', FECHA_OPERACION)
+      .eq('conductor_id', usuario.id)
+      .eq('activo', true);
+
+    if (!asignaciones || asignaciones.length === 0) {
+      return 'No tienes comunas asignadas';
+    }
+
+    const comunasOriginales = asignaciones.map(a => a.comuna).filter(Boolean);
+    const comunasNormalizadas = comunasOriginales.map(c => normalizarTexto(c));
+
+    const { data } = await supabase
+      .from('vista_consolidacion_final_operativa')
+      .select('*')
+      .limit(1000);
+
+    if (!data || data.length === 0) {
+      return 'No hay datos de pasajeros';
+    }
+
+    const filtrados = data.filter(p => {
+      const comunaDB = normalizarTexto(campo(p, ['Comuna']));
+      return comunasNormalizadas.some(c => comunaDB.includes(c));
+    });
+
+    if (!filtrados || filtrados.length === 0) {
+      return `No hay pasajeros disponibles para tus comunas: ${comunasOriginales.join(', ')}`;
+    }
+
+    filtrados.sort((a, b) => {
+      const ha = campo(a, ['Hora de reserva']) || '';
+      const hb = campo(b, ['Hora de reserva']) || '';
+      const na = campo(a, ['Nombre']) || '';
+      const nb = campo(b, ['Nombre']) || '';
+
+      if (ha !== hb) return ha.localeCompare(hb);
+      return na.localeCompare(nb);
+    });
+
+    const LIMITE = 15;
+    let r = `Pasajeros disponibles\nComunas asignadas: ${comunasOriginales.join(', ')}\n`;
+
+    filtrados.slice(0, LIMITE).forEach((p, i) => {
+      const hora = campo(p, ['Hora de reserva']) || 'Sin hora';
+      const nombre = campo(p, ['Nombre']) || 'Sin nombre';
+      const comuna = campo(p, ['Comuna']) || 'Sin comuna';
+
+      r += `${i + 1}. ${hora} - ${nombre} - ${comuna}\n`;
+    });
+
+    if (filtrados.length > LIMITE) {
+      r += `\nMostrando ${LIMITE} de ${filtrados.length} pasajeros.`;
+    }
+
+    return r;
   }
 
   return 'Opción no válida';
