@@ -301,6 +301,65 @@ async function procesarConductor(usuario, texto) {
   }
 
   if (texto === '2') {
+  const { data: asignaciones } = await supabase
+    .from('asignaciones_coordinador')
+    .select('comuna')
+    .eq('fecha_operacion', FECHA_OPERACION)
+    .eq('conductor_id', usuario.id)
+    .eq('activo', true);
+
+  if (!asignaciones || asignaciones.length === 0) {
+    return 'No tienes comunas asignadas';
+  }
+
+  const comunas = asignaciones.map(a => normalizarTexto(a.comuna));
+
+  const { data } = await supabase
+    .from('vista_consolidacion_final_operativa')
+    .select('*')
+    .limit(1000);
+
+  const filtrados = data.filter(p => {
+    const comunaDB = normalizarTexto(campo(p, ['Comuna']));
+    return comunas.some(c => comunaDB.includes(c));
+  });
+
+  if (!filtrados || filtrados.length === 0) {
+    return 'No hay pasajeros disponibles para tus comunas';
+  }
+
+  filtrados.sort((a, b) => {
+    const ha = campo(a, ['Hora de reserva']) || '';
+    const hb = campo(b, ['Hora de reserva']) || '';
+    const na = campo(a, ['Nombre']) || '';
+    const nb = campo(b, ['Nombre']) || '';
+
+    if (ha !== hb) return ha.localeCompare(hb);
+    return na.localeCompare(nb);
+  });
+
+  const grupos = {};
+
+  filtrados.forEach(p => {
+    const hora = campo(p, ['Hora de reserva']) || 'Sin hora';
+    const nombre = campo(p, ['Nombre']) || 'Sin nombre';
+
+    if (!grupos[hora]) grupos[hora] = [];
+    grupos[hora].push(nombre);
+  });
+
+  let r = 'Pasajeros disponibles:\n';
+
+  Object.keys(grupos).sort().forEach(hora => {
+    r += `\n${hora}\n`;
+
+    grupos[hora].forEach((nombre, i) => {
+      r += `${i + 1}. ${nombre}\n`;
+    });
+  });
+
+  return r;
+}
     if (!usuario.comuna_asignada) {
       return 'No tienes comuna asignada';
     }
