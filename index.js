@@ -296,75 +296,16 @@ async function procesarCoordinador(usuario, texto) {
 }
 
 async function procesarConductor(usuario, texto) {
+  const opcion = String(texto || '').trim();
+
   if (opcion === '1') {
     return 'No tienes pasajeros asignados';
   }
 
   if (opcion === '2') {
-    const { data: asignaciones } = await supabase
-      .from('asignaciones_coordinador')
-      .select('comuna')
-      .eq('fecha_operacion', FECHA_OPERACION)
-      .eq('conductor_id', usuario.id)
-      .eq('activo', true);
-
-    if (!asignaciones || asignaciones.length === 0) {
-      return 'No tienes comunas asignadas';
-    }
-
-    const comunasOriginales = asignaciones.map(a => a.comuna).filter(Boolean);
-    const comunasNormalizadas = comunasOriginales.map(c => normalizarTexto(c));
-
-    const { data } = await supabase
-      .from('vista_consolidacion_final_operativa')
-      .select('*')
-      .limit(1000);
-
-    if (!data || data.length === 0) {
-      return 'No hay datos de pasajeros';
-    }
-
-    const filtrados = data.filter(p => {
-      const comunaDB = normalizarTexto(campo(p, ['Comuna']));
-      return comunasNormalizadas.some(c => comunaDB.includes(c));
-    });
-
-    if (!filtrados || filtrados.length === 0) {
-      return `No hay pasajeros disponibles para tus comunas: ${comunasOriginales.join(', ')}`;
-    }
-
-    filtrados.sort((a, b) => {
-      const ha = campo(a, ['Hora de reserva']) || '';
-      const hb = campo(b, ['Hora de reserva']) || '';
-      const na = campo(a, ['Nombre']) || '';
-      const nb = campo(b, ['Nombre']) || '';
-
-      if (ha !== hb) return ha.localeCompare(hb);
-      return na.localeCompare(nb);
-    });
-
-    const grupos = {};
-
-    filtrados.forEach(p => {
-      const hora = campo(p, ['Hora de reserva']) || 'Sin hora';
-      const nombre = campo(p, ['Nombre']) || 'Sin nombre';
-      const comuna = campo(p, ['Comuna']) || 'Sin comuna';
-
-      if (!grupos[hora]) grupos[hora] = [];
-      grupos[hora].push({ nombre, comuna });
-    });
-
-    let r = `Pasajeros disponibles\nComunas asignadas: ${comunasOriginales.join(', ')}\n`;
-
-    Object.keys(grupos).sort().forEach(hora => {
-      r += `\n${hora}\n`;
-
-      grupos[hora].forEach((p, i) => {
-        r += `${i + 1}. ${p.nombre} - ${p.comuna}\n`;
-      });
-    });
-
-    return r;
+    return `OK opción 2 conductor detectada.
+Conductor: ${usuario.nombre}
+ID: ${usuario.id}`;
   }
 
   return 'Opción no válida';
