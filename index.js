@@ -443,10 +443,19 @@ async function procesarMensaje(telefono, mensaje) {
 
   const texto = mensaje.trim();
 
-  if (texto.toLowerCase() === 'menu') {
-    if (esCoordinador(usuario.rol)) return menuCoordinador(usuario.nombre);
-    if (esConductor(usuario.rol)) return menuConductor(usuario.nombre);
+
+if (texto.toLowerCase() === 'menu') {
+  if (usuario && usuario.id) {
+    delete sesionesConductor[usuario.id];
   }
+
+  if (esCoordinador(usuario.rol)) return menuCoordinador(usuario.nombre);
+  if (esConductor(usuario.rol)) return menuConductor(usuario.nombre);
+}
+
+
+
+
 
   if (esCoordinador(usuario.rol)) {
     return await procesarCoordinador(usuario, texto);
