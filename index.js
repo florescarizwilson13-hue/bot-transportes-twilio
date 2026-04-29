@@ -86,7 +86,8 @@ Panel Conductor
 1. Ver mis pasajeros
 2. Ver pasajeros disponibles por salida
 3. Tomar pasajero
-4. Traspasar pasajero`;
+4. Traspasar pasajero
+5. Ver conductores`;
 }
 
 async function buscarUsuarioPorNombre(nombre) {
@@ -107,6 +108,26 @@ async function buscarUsuarioPorNombre(nombre) {
   if (encontrados.length === 1) return encontrados[0];
 
   return encontrados;
+}
+
+async function verConductores() {
+  const { data, error } = await supabase
+    .from('usuarios')
+    .select('nombre')
+    .eq('rol', 'conductor')
+    .eq('activo', true)
+    .order('nombre');
+
+  if (error) return 'Error al obtener conductores';
+  if (!data || data.length === 0) return 'No hay conductores disponibles';
+
+  let r = 'Conductores disponibles:\n\n';
+
+  data.forEach((c, i) => {
+    r += `${i + 1}. ${c.nombre}\n`;
+  });
+
+  return r;
 }
 
 async function procesarCoordinador(usuario, texto) {
@@ -558,6 +579,10 @@ async function procesarConductor(usuario, texto) {
 
   if (opcion === '4') {
     return 'Para traspasar pasajero escribe:\ntraspasar PASAJERO | CONDUCTOR';
+  }
+
+  if (opcion === '5') {
+    return await verConductores();
   }
 
   return 'Opción no válida';
