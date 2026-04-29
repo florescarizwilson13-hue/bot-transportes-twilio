@@ -393,6 +393,7 @@ async function procesarConductor(usuario, texto) {
     const { data, error } = await supabase
       .from('reparto_pasajeros')
       .select(`
+        id,
         servicio_id,
         estado,
         servicios_consolidados (
@@ -413,12 +414,20 @@ async function procesarConductor(usuario, texto) {
       return ha.localeCompare(hb);
     });
 
+    sesionesConductor[usuario.id] = {
+      tipo: 'mis_pasajeros',
+      creado: Date.now(),
+      listaMisPasajeros: data
+    };
+
     let r = 'Mis pasajeros:\n';
 
     data.forEach((x, i) => {
       const p = x.servicios_consolidados || {};
       r += `${i + 1}. ${horaCorta(p.hora_reserva)} - ${p.nombre_pasajero || 'Sin nombre'} - ${p.comuna || 'Sin comuna'}\n`;
     });
+
+    r += '\nPara traspasar escribe:\ntraspasar 1 | nombre_conductor';
 
     return r;
   }
@@ -578,7 +587,72 @@ async function procesarConductor(usuario, texto) {
   }
 
   if (opcion === '4') {
-    return 'Para traspasar pasajero escribe:\ntraspasar PASAJERO | CONDUCTOR';
+    return 'Para traspasar pasajero:\n1. Escribe 1 para ver tus pasajeros\n2. Luego escribe:\ntraspasar 1 | nombre_conductor';
+  }
+
+  if (opcion.startsWith('traspasar ')) {
+    if (!sesion || sesion.tipo !== 'mis_pasajeros') {
+      return 'Primero usa opción 1 para ver tus pasajeros.';
+    }
+
+    if (!opcion.includes('|')) {
+      return 'Formato:\ntraspasar 1 | nombre_conductor';
+    }
+
+    const textoSinComando = opcion.replace('traspasar', '').trim();
+    const [numeroTxt, conductorTxt] = textoSinComando.split('|');
+
+    const indice = Number(String(numeroTxt || '').trim()) - 1;
+    const nombreDestino = String(conductorTxt || '').trim();
+
+    if (Number.isNaN(indice) || indice < 0) {
+      return 'Número de pasajero inválido.';
+    }
+
+    if (!nombreDestino) {
+      return 'Falta nombre del conductor destino.';
+    }
+
+    const item = sesion.listaMisPasajeros[indice];
+
+    if (!item) {
+      return 'No encontré ese número en tu lista.';
+    }
+
+    const conductorDestino = await buscarUsuarioPorNombre(nombreDestino);
+
+    if (!conductorDestino) {
+      return 'Conductor destino no encontrado.';
+    }
+
+    if (Array.isArray(conductorDestino)) {
+      let r = 'Varios conductores encontrados:\n';
+      conductorDestino.forEach(c => {
+        r += `- ${c.nombre}\n`;
+      });
+      return r;
+    }
+
+    const { error } = await supabase
+      .from('reparto_pasajeros')
+      .update({
+        conductor_id_actual: conductorDestino.id,
+        estado: 'traspasado',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', item.id);
+
+    if (error) {
+      return 'Error traspasando pasajero: ' + error.message;
+    }
+
+    const pasajero = item.servicios_consolidados || {};
+
+    sesionesConductor[usuario.id] = null;
+
+    return `✔ Pasajero traspasado:
+${pasajero.nombre_pasajero || 'Sin nombre'}
+a ${conductorDestino.nombre}`;
   }
 
   if (opcion === '5') {
