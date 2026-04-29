@@ -14,7 +14,6 @@ const supabase = createClient(
 );
 
 const FECHA_OPERACION = '2026-04-14';
-
 const sesionesConductor = {};
 
 function normalizarTexto(texto) {
@@ -351,37 +350,8 @@ async function obtenerPasajerosDisponiblesConductor(usuario) {
 }
 
 async function procesarConductor(usuario, texto) {
-  const opcion = String(texto || '').trim();
-
+  const opcion = String(texto || '').trim().toLowerCase();
   const sesion = sesionesConductor[usuario.id];
-
-  if (sesion && sesion.tipo === 'seleccion_salida' && /^\d+$/.test(opcion)) {
-    const edad = Date.now() - sesion.creado;
-
-    if (edad > 10 * 60 * 1000) {
-      delete sesionesConductor[usuario.id];
-      return 'La selección expiró. Escribe 2 nuevamente.';
-    }
-
-    const indice = Number(opcion) - 1;
-    const hora = sesion.horas[indice];
-
-    if (!hora) {
-      return 'Número de salida no válido. Escribe 2 para ver las salidas.';
-    }
-
-    const pasajeros = sesion.pasajerosPorHora[hora] || [];
-
-    let r = `Pasajeros salida ${horaCorta(hora)}:\n`;
-
-    pasajeros.forEach((p, i) => {
-      const nombre = campo(p, ['Nombre']) || 'Sin nombre';
-      const comuna = campo(p, ['Comuna']) || 'Sin comuna';
-      r += `${i + 1}. ${nombre} - ${comuna}\n`;
-    });
-
-    return r;
-  }
 
   if (opcion === '1') {
     return 'No tienes pasajeros asignados';
@@ -421,8 +391,111 @@ async function procesarConductor(usuario, texto) {
     return r;
   }
 
+  if (sesion && sesion.tipo === 'seleccion_salida' && /^\d+$/.test(opcion)) {
+    const indice = Number(opcion) - 1;
+    const hora = sesion.horas[indice];
+
+    if (!hora) return 'Número de salida no válido. Escribe 2 para ver salidas.';
+
+    const pasajeros = sesion.pasajerosPorHora[hora] || [];
+
+    sesionesConductor[usuario.id] = {
+      ...sesion,
+      tipo: 'viendo_pasajeros',
+      horaSeleccionada: hora,
+      listaActual: pasajeros
+    };
+
+    let r = `Pasajeros salida ${horaCorta(hora)}:\n`;
+
+    pasajeros.forEach((p, i) => {
+      const nombre = campo(p, ['Nombre']) || 'Sin nombre';
+      const comuna = campo(p, ['Comuna']) || 'Sin comuna';
+      r += `${i + 1}. ${nombre} - ${comuna}\n`;
+    });
+
+    r += '\nPara tomar escribe: tomar 1 o tomar 1,2';
+
+    return r;
+  }
+
   if (opcion === '3') {
-    return 'Para tomar pasajero escribe:\ntomar NOMBRE PASAJERO';
+    return 'Primero ve pasajeros con opción 2, elige una salida y luego escribe:\ntomar 1';
+  }
+
+  if (opcion.startsWith('tomar ')) {
+    if (!sesion || sesion.tipo !== 'viendo_pasajeros') {
+      return 'Primero ve pasajeros con opción 2 y elige una salida.';
+    }
+
+    const numerosTxt = opcion.replace('tomar', '').trim();
+
+    if (!numerosTxt) return 'Indica números: tomar 1 o tomar 1,2';
+
+    const indices = numerosTxt
+      .split(',')
+      .map(x => Number(x.trim()) - 1)
+      .filter(n => !Number.isNaN(n));
+
+    const seleccionados = indices
+      .map(i => sesion.listaActual[i])
+      .filter(Boolean);
+
+    if (seleccionados.length === 0) {
+      return 'No seleccionaste pasajeros válidos.';
+    }
+
+    let r = 'Pasajeros tomados:\n';
+
+    for (const p of seleccionados) {
+      const servicioId = campo(p, ['id']);
+
+      if (!servicioId) {
+        r += `⚠ ${campo(p, ['Nombre']) || 'Sin nombre'} sin ID\n`;
+        continue;
+      }
+
+      const { data: existe } = await supabase
+        .from('reparto_pasajeros')
+        .select('id, conductor_id_actual')
+        .eq('servicio_id', servicioId)
+        .maybeSingle();
+
+      if (existe && existe.conductor_id_actual && existe.conductor_id_actual !== usuario.id) {
+        r += `⚠ ${campo(p, ['Nombre'])} ya tomado por otro conductor\n`;
+        continue;
+      }
+
+      if (existe && existe.conductor_id_actual === usuario.id) {
+        r += `⚠ ${campo(p, ['Nombre'])} ya está en tu lista\n`;
+        continue;
+      }
+
+      if (existe) {
+        await supabase
+          .from('reparto_pasajeros')
+          .update({
+            conductor_id_actual: usuario.id,
+            conductor_id_original: usuario.id,
+            estado: 'tomado',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existe.id);
+      } else {
+        await supabase
+          .from('reparto_pasajeros')
+          .insert({
+            servicio_id: servicioId,
+            conductor_id_actual: usuario.id,
+            conductor_id_original: usuario.id,
+            estado: 'tomado'
+          });
+      }
+
+      r += `✔ ${campo(p, ['Nombre'])}\n`;
+    }
+
+    return r;
   }
 
   if (opcion === '4') {
@@ -441,21 +514,14 @@ async function procesarMensaje(telefono, mensaje) {
 
   if (!usuario) return 'Número no autorizado';
 
-  const texto = mensaje.trim();
+  const texto = String(mensaje || '').trim();
 
-
-if (texto.toLowerCase() === 'menu') {
-  if (usuario && usuario.id) {
+  if (texto.toLowerCase() === 'menu') {
     delete sesionesConductor[usuario.id];
+
+    if (esCoordinador(usuario.rol)) return menuCoordinador(usuario.nombre);
+    if (esConductor(usuario.rol)) return menuConductor(usuario.nombre);
   }
-
-  if (esCoordinador(usuario.rol)) return menuCoordinador(usuario.nombre);
-  if (esConductor(usuario.rol)) return menuConductor(usuario.nombre);
-}
-
-
-
-
 
   if (esCoordinador(usuario.rol)) {
     return await procesarCoordinador(usuario, texto);
