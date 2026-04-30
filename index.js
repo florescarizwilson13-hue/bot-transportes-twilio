@@ -684,6 +684,17 @@ Capacidad: ${capacidad}
 Debes traspasar ${total - capacidad} pasajero(s).`;
     }
 
+    const { error: errorUpdate } = await supabase
+      .from('reparto_pasajeros')
+      .update({
+        inicio_servicio: new Date().toISOString()
+      })
+      .eq('conductor_id_actual', usuario.id);
+
+    if (errorUpdate) {
+      return 'Error guardando inicio de servicio: ' + errorUpdate.message;
+    }
+
     return `Servicio iniciado correctamente.
 
 Pasajeros: ${total}
@@ -702,6 +713,17 @@ Capacidad: ${capacidad}`;
 
     if (total === 0) {
       return 'No tienes pasajeros asignados para terminar servicio.';
+    }
+
+    const { error: errorUpdate } = await supabase
+      .from('reparto_pasajeros')
+      .update({
+        termino_servicio: new Date().toISOString()
+      })
+      .eq('conductor_id_actual', usuario.id);
+
+    if (errorUpdate) {
+      return 'Error guardando término de servicio: ' + errorUpdate.message;
     }
 
     return `Servicio terminado correctamente.
