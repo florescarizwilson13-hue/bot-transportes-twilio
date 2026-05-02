@@ -5,4 +5,4 @@ logs/*.log
 *.swp
 *.swo
 .vscode/
-.idea/
+.idea/node_modules/
