@@ -319,19 +319,47 @@ app.post(['/webhook', '/twilio/webhook'], async (req, res) => {
 
         const { data, error } = await supabase
           .from('servicios_consolidados')
-          .select('codigo_reserva, nombre_pasajero, comuna, hora_reserva')
+          .select('codigo_reserva, nombre_pasajero, comuna, hora_reserva, fecha_reserva')
           .eq('fecha_reserva', fechaHoy)
           .ilike('comuna', `%${terminoComuna}%`)
           .order('hora_reserva')
           .order('nombre_pasajero');
 
         if (error) return res.json({ ok: false, respuesta: 'Error viendo comuna: ' + error.message });
-        if (!data || data.length === 0) return res.json({ ok: true, respuesta: `No hay pasajeros en ${comuna}` });
 
-        let respuesta = `Pasajeros encontrados para ${comuna}:
+        if (!data || data.length === 0) {
+          const { data: otrasFechas, error: errorOtrasFechas } = await supabase
+            .from('servicios_consolidados')
+            .select('codigo_reserva, nombre_pasajero, comuna, hora_reserva, fecha_reserva')
+            .ilike('comuna', `%${terminoComuna}%`)
+            .order('fecha_reserva')
+            .order('hora_reserva')
+            .limit(20);
+
+          if (errorOtrasFechas) {
+            return res.json({ ok: false, respuesta: 'Error buscando otras fechas: ' + errorOtrasFechas.message });
+          }
+
+          if (otrasFechas && otrasFechas.length > 0) {
+            let respuesta = `No hay pasajeros en ${comuna} para la fecha operativa ${fechaHoy}.
+
+Pero sí existen pasajeros en otras fechas:
+`;
+            otrasFechas.forEach((x, i) => {
+              respuesta += `${i + 1}. ${x.fecha_reserva} - ${x.codigo_reserva} - ${x.nombre_pasajero} - ${x.hora_reserva}
+`;
+            });
+            return res.json({ ok: true, respuesta });
+          }
+
+          return res.json({ ok: true, respuesta: `No hay pasajeros en ${comuna}` });
+        }
+
+        let respuesta = `Pasajeros encontrados para ${comuna} (${fechaHoy}):
 `;
         data.forEach((x, i) => {
-          respuesta += `${i + 1}. ${x.codigo_reserva} - ${x.nombre_pasajero} - ${x.hora_reserva}\n`;
+          respuesta += `${i + 1}. ${x.codigo_reserva} - ${x.nombre_pasajero} - ${x.hora_reserva}
+`;
         });
 
         return res.json({ ok: true, respuesta });
