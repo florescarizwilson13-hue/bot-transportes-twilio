@@ -167,6 +167,31 @@ function mapearOpcionANombreComando(usuario, textoOriginal) {
   return textoOriginal;
 }
 
+function quitarTildes(valor) {
+  return String(valor || '')
+    .toLowerCase()
+    .replaceAll('á', 'a')
+    .replaceAll('é', 'e')
+    .replaceAll('í', 'i')
+    .replaceAll('ó', 'o')
+    .replaceAll('ú', 'u')
+    .replaceAll('ñ', 'n')
+    .trim();
+}
+
+function terminoBusquedaComuna(comuna) {
+  const limpia = quitarTildes(comuna);
+
+  if (limpia.includes('valpa')) return 'valpa';
+  if (limpia.includes('vina')) return 'Viña';
+  if (limpia.includes('quilp')) return 'quil';
+  if (limpia.includes('villa')) return 'villa';
+  if (limpia.includes('con con') || limpia.includes('concon')) return 'con con';
+  if (limpia.includes('andes')) return 'andes';
+
+  return comuna;
+}
+
 app.post(['/webhook', '/twilio/webhook'], async (req, res) => {
   try {
     const esTwilio = req.path === '/twilio/webhook' || req.body.From || req.body.Body;
@@ -290,19 +315,21 @@ app.post(['/webhook', '/twilio/webhook'], async (req, res) => {
 
       if (texto.startsWith('ver ')) {
         const comuna = textoMapeado.slice(4).trim();
+        const terminoComuna = terminoBusquedaComuna(comuna);
 
         const { data, error } = await supabase
           .from('servicios_consolidados')
           .select('codigo_reserva, nombre_pasajero, comuna, hora_reserva')
           .eq('fecha_reserva', fechaHoy)
-          .eq('comuna', comuna)
+          .ilike('comuna', `%${terminoComuna}%`)
           .order('hora_reserva')
           .order('nombre_pasajero');
 
         if (error) return res.json({ ok: false, respuesta: 'Error viendo comuna: ' + error.message });
         if (!data || data.length === 0) return res.json({ ok: true, respuesta: `No hay pasajeros en ${comuna}` });
 
-        let respuesta = `Pasajeros en ${comuna}:\n`;
+        let respuesta = `Pasajeros encontrados para ${comuna}:
+`;
         data.forEach((x, i) => {
           respuesta += `${i + 1}. ${x.codigo_reserva} - ${x.nombre_pasajero} - ${x.hora_reserva}\n`;
         });
