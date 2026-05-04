@@ -320,6 +320,7 @@ app.post(['/webhook', '/twilio/webhook'], async (req, res) => {
         const { data, error } = await supabase
           .from('servicios_consolidados')
           .select('codigo_reserva, nombre_pasajero, comuna, hora_reserva')
+          .eq('fecha_reserva', fechaHoy)
           .ilike('comuna', `%${terminoComuna}%`)
           .order('hora_reserva')
           .order('nombre_pasajero');
